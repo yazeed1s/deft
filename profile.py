@@ -25,7 +25,7 @@ DISK_IMAGE = "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU20-64-
 # this is important because CN access MN memory directly with RDMA
 # without asking MN cpu to do anything (this is "one-sided" RDMA)
 for i in range(NUM_MN):
-    mn = request.RawPC(f"mn{i}")
+    mn = request.RawPC("mn{}".format(i))
     mn.hardware_type = NODE_TYPE
     mn.disk_image = DISK_IMAGE
 
@@ -36,7 +36,7 @@ for i in range(NUM_MN):
 # this cache is very important for performance, paper talk about it a lot
 # when cache is full the CN need more RDMA round trips which is slow
 for i in range(NUM_CN):
-    cn = request.RawPC(f"cn{i}")
+    cn = request.RawPC("cn{}".format(i))
     cn.hardware_type = NODE_TYPE
     cn.disk_image = DISK_IMAGE
 
@@ -73,14 +73,14 @@ lan = request.LAN("deft-lan")
 lan.bandwidth = 100000  # this is in kbps so 100000 = 100 gbps
 
 for i in range(NUM_MN):
-    node = request.get_node(f"mn{i}")
-    iface = node.addInterface(f"if-mn{i}")
+    node = request.get_node("mn{}".format(i))
+    iface = node.addInterface("iface-mn{}".format(i))
     iface.bandwidth = 100000
     lan.addInterface(iface)
 
 for i in range(NUM_CN):
-    node = request.get_node(f"cn{i}")
-    iface = node.addInterface(f"if-cn{i}")
+    node = request.get_node("cn{}".format(i))
+    iface = node.addInterface("iface-cn{}".format(i))
     iface.bandwidth = 100000
     lan.addInterface(iface)
 
