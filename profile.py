@@ -20,6 +20,7 @@ NODE_TYPE = "r650"
 DISK_IMAGE = "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD"
 
 #  memory nodes
+mn_nodes = []
 # MN is where deft tree index actually live in memory
 # paper explain in section 2.1 that MN have lot of memory but weak CPU
 # this is important because CN access MN memory directly with RDMA
@@ -28,8 +29,10 @@ for i in range(NUM_MN):
     mn = request.RawPC("mn{}".format(i))
     mn.hardware_type = NODE_TYPE
     mn.disk_image = DISK_IMAGE
+    mn_nodes.append(mn)
 
 # compute nodes
+cn_nodes = []
 # CN is where benchmark client threads run
 # paper use 30 threads per CN, so with 10 CN = 300 threads total (section 5.2)
 # each CN also have 1GB local memory for index cache
@@ -39,25 +42,22 @@ for i in range(NUM_CN):
     cn = request.RawPC("cn{}".format(i))
     cn.hardware_type = NODE_TYPE
     cn.disk_image = DISK_IMAGE
+    cn_nodes.append(cn)
 
 # nfs setup on mn0
 # readme say we need to mount repo with nfs on all nodes with same path
 # so we build deft code only one time on mn0
 # then all other nodes can see the binary through nfs, no need build again
 # this save a lot of time when you have 10 nodes
-mn0 = request.get_node("mn0")
-mn0.addService(pg.Execute(
+mn_nodes[0].addService(pg.Execute(
     shell="bash",
     command="""
     sudo apt-get update -q
     sudo apt-get install -y nfs-kernel-server
-
-    # /mydata is where we put the deft repo and build files
     sudo mkdir -p /mydata
     echo '/mydata *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
     sudo exportfs -a
     sudo systemctl restart nfs-kernel-server
-
     echo 'nfs server ready' > /tmp/nfs_ready
     """
 ))
