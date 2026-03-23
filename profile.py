@@ -5,7 +5,7 @@ pc = portal.Context()
 request = pc.makeRequestRSpec()
 
 # how many memory nodes and compute nodes we need
-# paper use 2 MN and 10 CN in most experiments (ses section 5.2 in the paper)
+# paper use 2 MN and 10 CN in most experiments (see section 5.2 in the paper)
 NUM_MN = 2
 NUM_CN = 10
 
@@ -19,7 +19,7 @@ NODE_TYPE = "r650"
 # 20.04 still work with MLNX_OFED 4.9 which deft need
 DISK_IMAGE = "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD"
 
-#  memory nodes
+# memory nodes
 mn_nodes = []
 # MN is where deft tree index actually live in memory
 # paper explain in section 2.1 that MN have lot of memory but weak CPU
@@ -72,15 +72,13 @@ mn_nodes[0].addService(pg.Execute(
 lan = request.LAN("deft-lan")
 lan.bandwidth = 100000  # this is in kbps so 100000 = 100 gbps
 
-for i in range(NUM_MN):
-    node = request.get_node("mn{}".format(i))
-    iface = node.addInterface("iface-mn{}".format(i))
+for i, mn in enumerate(mn_nodes):
+    iface = mn.addInterface("iface-mn{}".format(i))
     iface.bandwidth = 100000
     lan.addInterface(iface)
 
-for i in range(NUM_CN):
-    node = request.get_node("cn{}".format(i))
-    iface = node.addInterface("iface-cn{}".format(i))
+for i, cn in enumerate(cn_nodes):
+    iface = cn.addInterface("iface-cn{}".format(i))
     iface.bandwidth = 100000
     lan.addInterface(iface)
 
