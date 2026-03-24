@@ -1,32 +1,33 @@
 # deft reproduction scripts
 
-Scripts to set up and run deft on CloudLab (Clemson cluster, r650 machines).
+Scripts to set up and run deft on CloudLab (Utah cluster, d6515 machines).
 
 ## Setup
 
-12 nodes total: 2 memory nodes (mn0, mn1) and 10 compute nodes (cn0–cn9).
+3 nodes total: 1 memory node (mn0) and 2 compute nodes (cn0, cn1).
 
 | Script | Run on | Purpose |
 |---|---|---|
+| `setup_all.sh` | all 3 nodes | Install RDMA drivers, dependencies, mount NFS |
 | `setup_mn.sh` | mn0 only | Clone repo, build deft, start memcached |
-| `setup_all.sh` | all 12 nodes | Install RDMA drivers, dependencies, mount NFS |
-| `run_servers.sh` | mn0, mn1 | Start deft server process |
+| `run_servers.sh` | mn0 | Start deft server process |
+| `run_clients.sh` | cn0, cn1 | Start deft client process |
 
 ## Usage
 
 Get mn0's IP from the CloudLab experiment page, then:
 
 ```bash
-# on mn0 first
+# on mn0 first (sets up NFS server, clones and builds deft)
 bash setup_mn.sh
 
-# on all 12 nodes (can run in parallel)
+# on all 3 nodes (installs RDMA, deps; skips NFS mount on mn0 automatically)
 bash setup_all.sh <mn0-ip>
 
-# on mn0 and mn1
+# on mn0
 bash run_servers.sh
 
-# on cn0–cn9
+# on cn0, cn1
 bash run_clients.sh
 ```
 

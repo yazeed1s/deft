@@ -31,15 +31,20 @@ sudo /etc/init.d/openibd restart
 echo 4096 | sudo tee /proc/sys/vm/nr_hugepages
 echo "vm.nr_hugepages = 4096" | sudo tee -a /etc/sysctl.conf
 
-# mount nfs from mn0
+# mount nfs from mn0 (skip if this node IS mn0)
 MN0_IP=$1
 if [ -z "$MN0_IP" ]; then
     echo "usage: ./setup_all.sh <mn0-ip>"
     exit 1
 fi
 
-sudo mkdir -p /mydata
-sudo mount -t nfs $MN0_IP:/mydata /mydata
-echo "$MN0_IP:/mydata /mydata nfs defaults 0 0" | sudo tee -a /etc/fstab
+MY_IP=$(hostname -I | awk '{print $1}')
+if [ "$MY_IP" = "$MN0_IP" ]; then
+    echo "this is mn0, skipping nfs mount"
+else
+    sudo mkdir -p /mydata
+    sudo mount -t nfs $MN0_IP:/mydata /mydata
+    echo "$MN0_IP:/mydata /mydata nfs defaults 0 0" | sudo tee -a /etc/fstab
+fi
 
 echo "done."

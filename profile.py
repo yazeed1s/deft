@@ -7,18 +7,19 @@ request = pc.makeRequestRSpec()
 # how many memory nodes and compute nodes we need
 # paper use 2 MN and 10 CN in most experiments (see section 5.2 in the paper)
 NUM_MN = 1
-NUM_CN = 4
+NUM_CN = 2
 
 # r650 is the machine type at clemson cluster
 # it has mellanox connectx-6 NIC which is good because
 # deft paper require connectx-5 or above (see system requirements in readme)
 # also r650 have 96GB memory which MN need to store the whole tree index
-NODE_TYPE = "r650"
+# NODE_TYPE = "r650"
+NODE_TYPE = "d6515"
 
 # ubuntu 20.04 because paper use 18.04 but cloudlab not support it good anymore
 # 20.04 still work with MLNX_OFED 4.9 which deft need
-DISK_IMAGE = "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD"
-
+# DISK_IMAGE = "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD"
+DISK_IMAGE = "urn:publicid:IDN+emulab.net+image+emulab-ops/UBUNTU20-64-STD"  # utah
 # memory nodes
 mn_nodes = []
 # MN is where deft tree index actually live in memory
