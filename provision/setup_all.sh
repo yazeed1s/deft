@@ -11,6 +11,9 @@ sudo apt-get install -y \
     memcached \
     libmemcached-dev \
     libboost-all-dev \
+    gcc-10 \
+    g++-10 \
+    libgflags-dev \
     cmake \
     build-essential \
     libnuma-dev \
@@ -42,6 +45,9 @@ sudo /etc/init.d/openibd restart
 # huge pages
 echo 4096 | sudo tee /proc/sys/vm/nr_hugepages
 echo "vm.nr_hugepages = 4096" | sudo tee -a /etc/sysctl.conf
+
+export CC=gcc-10
+export CXX=g++-10
 
 # mount nfs from mn0 (skip if this node IS mn0)
 MN0_IP=$1
