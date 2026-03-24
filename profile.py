@@ -19,7 +19,7 @@ NODE_TYPE = "d6515"
 # ubuntu 20.04 because paper use 18.04 but cloudlab not support it good anymore
 # 20.04 still work with MLNX_OFED 4.9 which deft need
 # DISK_IMAGE = "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD"
-DISK_IMAGE = "urn:publicid:IDN+emulab.net+image+emulab-ops/UBUNTU20-64-STD"  # utah
+DISK_IMAGE = "urn:publicid:IDN+utah.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD"
 # memory nodes
 mn_nodes = []
 # MN is where deft tree index actually live in memory
