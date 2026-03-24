@@ -1,8 +1,8 @@
 #!/bin/bash
-# run_clients.sh - run on cn0 and cn1
+# run_clients.sh - run on cn0–cn5
 
-SERVER_COUNT=1
-CLIENT_COUNT=2
+SERVER_COUNT=2
+CLIENT_COUNT=6
 
 echo "starting deft client on $(hostname)..."
 cd /mydata/deft/build

@@ -4,30 +4,33 @@ Scripts to set up and run deft on CloudLab (Utah cluster, d6515 machines).
 
 ## Setup
 
-3 nodes total: 1 memory node (mn0) and 2 compute nodes (cn0, cn1).
+8 nodes total: 2 memory nodes (mn0, mn1) and 6 compute nodes (cn0–cn5).
 
 | Script | Run on | Purpose |
 |---|---|---|
 | `setup_all.sh` | all 3 nodes | Install RDMA drivers, dependencies, mount NFS |
 | `setup_mn.sh` | mn0 only | Clone repo, build deft, start memcached |
-| `run_servers.sh` | mn0 | Start deft server process |
-| `run_clients.sh` | cn0, cn1 | Start deft client process |
+| `run_servers.sh` | mn0, mn1 | Start deft server process |
+| `run_clients.sh` | cn0–cn5 | Start deft client process |
 
 ## Usage
 
 Get mn0's IP from the CloudLab experiment page, then:
 
 ```bash
-# on mn0 first (sets up NFS server, clones and builds deft)
-bash setup_mn.sh
-
-# on all 3 nodes (installs RDMA, deps; skips NFS mount on mn0 automatically)
+# 1. on mn0 first (install deps, RDMA drivers; skips NFS self-mount automatically)
 bash setup_all.sh <mn0-ip>
 
-# on mn0
+# 2. on mn0 (clone repo, build deft, start memcached)
+bash setup_mn.sh
+
+# 3. on remaining 7 nodes in parallel (install deps, mount NFS)
+bash setup_all.sh <mn0-ip>
+
+# 4. on mn0 and mn1
 bash run_servers.sh
 
-# on cn0, cn1
+# 5. on cn0–cn5
 bash run_clients.sh
 ```
 

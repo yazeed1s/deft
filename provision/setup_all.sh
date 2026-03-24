@@ -10,14 +10,26 @@ sudo apt-get update -q
 sudo apt-get install -y \
     memcached \
     libmemcached-dev \
-    libcityhash-dev \
     libboost-all-dev \
     cmake \
     build-essential \
     libnuma-dev \
     nfs-common \
     ibverbs-utils \
-    infiniband-diags
+    infiniband-diags \
+    autoconf \
+    automake \
+    libtool
+
+# cityhash (not in ubuntu 20.04 repos, build from source)
+cd /tmp
+git clone https://github.com/google/cityhash.git
+cd cityhash
+autoreconf -if
+./configure
+make -j$(nproc)
+sudo make install
+sudo ldconfig
 
 # MLNX_OFED 4.9-5.1.0.0 (5.x requires source modifications, see readme)
 cd /tmp

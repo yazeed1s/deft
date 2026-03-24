@@ -6,8 +6,8 @@ request = pc.makeRequestRSpec()
 
 # how many memory nodes and compute nodes we need
 # paper use 2 MN and 10 CN in most experiments (see section 5.2 in the paper)
-NUM_MN = 1
-NUM_CN = 2
+NUM_MN = 2
+NUM_CN = 6
 
 # r650 is the machine type at clemson cluster
 # it has mellanox connectx-6 NIC which is good because
