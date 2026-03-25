@@ -22,14 +22,31 @@ mn_setup = """
 set -e
 sudo apt-get update -q
 # Install required packages immediately at boot
-sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
+sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
 cd /tmp
 wget -q https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
 tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
 cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
 sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
 sudo /etc/init.d/openibd restart || true
-if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print $5}' | xargs -I {} sudo ip link set dev {} up || true; fi
+if command -v ibdev2netdev >/dev/null 2>&1; then
+    RDMA_IFACE=$(sudo ibdev2netdev | head -n 1 | awk '{print $5}')
+    if [[ -n "$RDMA_IFACE" ]]; then
+        sudo ip link set dev "$RDMA_IFACE" up || true
+        HOSTNAME=$(hostname -s)
+        if [[ "$HOSTNAME" == "mn0" ]]; then
+            TARGET_IP="10.10.1.1"
+        elif [[ "$HOSTNAME" == cn* ]]; then
+            IDX=${HOSTNAME//[!0-9]/}
+            TARGET_IP="10.10.1.$((IDX + 2))"
+        else
+            TARGET_IP=""
+        fi
+        if [[ -n "$TARGET_IP" ]] && ! ip addr show "$RDMA_IFACE" | grep -q "$TARGET_IP"; then
+            sudo ip addr add "$TARGET_IP/24" dev "$RDMA_IFACE" || true
+        fi
+    fi
+fi
 
 # Setup NFS
 sudo mkdir -p /mydata
@@ -46,14 +63,31 @@ cn_setup = """
 #!/bin/bash
 set -e
 sudo apt-get update -q
-sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
+sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
 cd /tmp
 wget -q https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
 tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
 cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
 sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
 sudo /etc/init.d/openibd restart || true
-if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print $5}' | xargs -I {} sudo ip link set dev {} up || true; fi
+if command -v ibdev2netdev >/dev/null 2>&1; then
+    RDMA_IFACE=$(sudo ibdev2netdev | head -n 1 | awk '{print $5}')
+    if [[ -n "$RDMA_IFACE" ]]; then
+        sudo ip link set dev "$RDMA_IFACE" up || true
+        HOSTNAME=$(hostname -s)
+        if [[ "$HOSTNAME" == "mn0" ]]; then
+            TARGET_IP="10.10.1.1"
+        elif [[ "$HOSTNAME" == cn* ]]; then
+            IDX=${HOSTNAME//[!0-9]/}
+            TARGET_IP="10.10.1.$((IDX + 2))"
+        else
+            TARGET_IP=""
+        fi
+        if [[ -n "$TARGET_IP" ]] && ! ip addr show "$RDMA_IFACE" | grep -q "$TARGET_IP"; then
+            sudo ip addr add "$TARGET_IP/24" dev "$RDMA_IFACE" || true
+        fi
+    fi
+fi
 
 # Wait for mn0 to export NFS and mount it
 echo "Waiting for mn0 NFS to be ready..."

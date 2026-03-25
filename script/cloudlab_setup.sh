@@ -9,7 +9,7 @@ fi
 
 echo "installing packages on mn0..."
 sudo apt-get update -q
-sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential
+sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
 
 echo "checking rdma..."
 if ! command -v ibv_devinfo >/dev/null 2>&1; then
@@ -95,7 +95,7 @@ echo "done. deft is built."
 
 echo "6. setting up ssh keys covering all nodes..."
 if [ ! -f ~/.ssh/id_rsa ]; then
-    ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
+    ssh-keygen -m PEM -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa
     cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
     chmod 600 ~/.ssh/authorized_keys
 fi

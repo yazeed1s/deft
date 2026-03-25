@@ -9,14 +9,14 @@ fi
 
 echo "setting up ssh keys so mn0 can talk to cn nodes..."
 if [ ! -f ~/.ssh/id_rsa ]; then
-    ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
+    ssh-keygen -m PEM -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa
     cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
     chmod 600 ~/.ssh/authorized_keys
 fi
 
 echo "installing packages on mn0..."
 sudo apt-get update -q
-sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
+sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
 
 echo "installing MLNX_OFED user-space headers on mn0..."
 cd /tmp
@@ -44,7 +44,7 @@ for node in $CN_NODES; do
     
     # install packages
     ssh -o StrictHostKeyChecking=no $node "sudo apt-get update -q"
-    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml"
+    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml"
     ssh -o StrictHostKeyChecking=no $node "cd /tmp && if [ ! -d \"MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64\" ]; then wget -q https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz && tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz; fi && cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --force --without-fw-update && sudo /etc/init.d/openibd restart; if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi"
     
     # nfs mount

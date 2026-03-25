@@ -1,8 +1,7 @@
 build/
 build/*
 .vscode/
-log/
-result/
 global_config.sh
 global_config.yaml
 __pycache__/
+*.tex
