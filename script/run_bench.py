@@ -11,6 +11,9 @@ from itertools import product
 from time import gmtime, strftime
 from ssh_connect import ssh_command
 
+MIN_SERVER_HUGEPAGES = 32768
+MIN_CLIENT_HUGEPAGES = 1024
+
 def dump_remote_log(ip, username, password, log_path, role, idx, lines=80):
     cmd = (
         "bash -lc '"
@@ -36,41 +39,44 @@ def dump_remote_log(ip, username, password, log_path, role, idx, lines=80):
 def check_hugepages(g_cfg):
     username = g_cfg['username']
     password = g_cfg['password']
-    ip_set = set()
+    required_per_ip = {}
     failed = False
 
+    for node in g_cfg['servers']:
+        ip = node['ip']
+        required_per_ip[ip] = max(required_per_ip.get(ip, 0), MIN_SERVER_HUGEPAGES)
+
+    for node in g_cfg['clients']:
+        ip = node['ip']
+        required_per_ip[ip] = max(required_per_ip.get(ip, 0), MIN_CLIENT_HUGEPAGES)
+
     print("preflight: checking hugepages on all nodes...")
-    for node_list in [g_cfg['servers'], g_cfg['clients']]:
-        for node in node_list:
-            ip = node['ip']
-            if ip in ip_set:
-                continue
-            ip_set.add(ip)
-            cmd = "bash -lc 'cat /proc/sys/vm/nr_hugepages 2>/dev/null || echo -1'"
-            try:
-                ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
-                out = stdout.read().decode("utf-8", errors="replace").strip()
-                err = stderr.read().decode("utf-8", errors="replace").strip()
-                ssh.close()
-            except Exception as e:
-                print(f"preflight error on {ip}: cannot query hugepages ({e})")
-                failed = True
-                continue
+    for ip, min_hp in sorted(required_per_ip.items()):
+        cmd = "bash -lc 'cat /proc/sys/vm/nr_hugepages 2>/dev/null || echo -1'"
+        try:
+            ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
+            out = stdout.read().decode("utf-8", errors="replace").strip()
+            err = stderr.read().decode("utf-8", errors="replace").strip()
+            ssh.close()
+        except Exception as e:
+            print(f"preflight error on {ip}: cannot query hugepages ({e})")
+            failed = True
+            continue
 
-            try:
-                hp = int(out.splitlines()[-1]) if out else -1
-            except ValueError:
-                hp = -1
+        try:
+            hp = int(out.splitlines()[-1]) if out else -1
+        except ValueError:
+            hp = -1
 
-            print(f"  node {ip}: vm.nr_hugepages={hp}")
-            if err:
-                print(f"  node {ip}: ssh stderr: {err}")
+        print(f"  node {ip}: vm.nr_hugepages={hp} (required >= {min_hp})")
+        if err:
+            print(f"  node {ip}: ssh stderr: {err}")
 
-            if hp <= 0:
-                failed = True
+        if hp < min_hp:
+            failed = True
 
     if failed:
-        print("preflight failed: hugepages are missing on one or more nodes.")
+        print("preflight failed: hugepages are insufficient on one or more nodes.")
         print("run: python3 ../script/all_hugepage.py")
         return False
     return True

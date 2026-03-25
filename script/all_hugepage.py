@@ -6,6 +6,8 @@ from ssh_connect import ssh_command
 with open('../script/global_config.yaml', 'r') as f:
     g_cfg = yaml.safe_load(f)
 
+SERVER_HUGEPAGES = 32768
+
 def all_hugepage():
     ip_set = set()
     username=g_cfg['username']
@@ -17,7 +19,10 @@ def all_hugepage():
                 continue
             ip_set.add(ip)
             print(f'hugepage ${ip}')
-            cmd = f'sudo sysctl -w vm.nr_hugepages=16384 && sudo sysctl -w kernel.watchdog_thresh=120'
+            cmd = (
+                f'sudo sysctl -w vm.nr_hugepages={SERVER_HUGEPAGES} '
+                '&& sudo sysctl -w kernel.watchdog_thresh=120'
+            )
             ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
             ssh.close()
 
