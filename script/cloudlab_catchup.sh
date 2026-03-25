@@ -5,6 +5,7 @@ set -e
 OFED_DIR="MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64"
 OFED_TGZ="${OFED_DIR}.tgz"
 OFED_URL="http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/${OFED_TGZ}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 has_rdma_hca() {
     ibv_devinfo -l 2>/dev/null | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found'
@@ -70,7 +71,7 @@ if ! has_rdma_hca || ! has_exp_verbs_api; then
     rm -rf "$OFED_DIR"
     tar xzf "$OFED_TGZ"
     cd "$OFED_DIR"
-    sudo ./mlnxofedinstall --basic --force --without-fw-update
+    sudo ./mlnxofedinstall --basic --force --without-fw-update --yes
     sudo /etc/init.d/openibd restart || true
     sudo ldconfig
     load_rdma_modules
@@ -85,6 +86,10 @@ else
 fi
 if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print $5}' | xargs -I {} sudo ip link set dev {} up; fi
 load_rdma_modules
+if [ -x "${SCRIPT_DIR}/net_heal.sh" ]; then
+    echo "healing rdma lan on mn0..."
+    "${SCRIPT_DIR}/net_heal.sh" || true
+fi
 
 echo "installing CityHash on mn0..."
 cd /tmp
@@ -133,7 +138,7 @@ for node in $CN_NODES; do
 
         echo "copying ofed tarball from mn0 -> $node"
         scp -o StrictHostKeyChecking=no /tmp/"$OFED_TGZ" $node:/tmp/
-        ssh -o StrictHostKeyChecking=no $node "cd /tmp && rm -rf $OFED_DIR && tar xzf $OFED_TGZ && cd $OFED_DIR && sudo ./mlnxofedinstall --basic --force --without-fw-update && (sudo /etc/init.d/openibd restart || true) && sudo ldconfig && sudo modprobe mlx5_core || true && sudo modprobe mlx5_ib || true && sudo modprobe ib_uverbs || true && sudo modprobe ib_core || true && sudo modprobe rdma_cm || true && sudo modprobe iw_cm || true && touch /tmp/.ofed_done"
+        ssh -o StrictHostKeyChecking=no $node "cd /tmp && rm -rf $OFED_DIR && tar xzf $OFED_TGZ && cd $OFED_DIR && sudo ./mlnxofedinstall --basic --force --without-fw-update --yes && (sudo /etc/init.d/openibd restart || true) && sudo ldconfig && sudo modprobe mlx5_core || true && sudo modprobe mlx5_ib || true && sudo modprobe ib_uverbs || true && sudo modprobe ib_core || true && sudo modprobe rdma_cm || true && sudo modprobe iw_cm || true && touch /tmp/.ofed_done"
         if ! ssh -o StrictHostKeyChecking=no $node "ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q 'ibv_exp_dct' /usr/include/infiniband/verbs_exp.h"; then
             echo "warning: post-install RDMA check is still not clean on $node; continuing."
         fi
@@ -142,7 +147,6 @@ for node in $CN_NODES; do
     fi
     ssh -o StrictHostKeyChecking=no $node "if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi" || true
     ssh -o StrictHostKeyChecking=no $node "sudo modprobe mlx5_core || true; sudo modprobe mlx5_ib || true; sudo modprobe ib_uverbs || true; sudo modprobe ib_core || true; sudo modprobe rdma_cm || true; sudo modprobe iw_cm || true" || true
-
     # push natively compiled CityHash modules from mn0 directly into local lib to avoid redundant make cycles
     if ssh -o StrictHostKeyChecking=no $node "[ ! -f /tmp/.cityhash_done ]"; then
         echo "copying cityhash from mn0 -> $node"
