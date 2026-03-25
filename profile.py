@@ -29,6 +29,7 @@ tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
 cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
 sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
 sudo /etc/init.d/openibd restart || true
+if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print $5}' | xargs -I {} sudo ip link set dev {} up || true; fi
 
 # Setup NFS
 sudo mkdir -p /mydata
@@ -52,6 +53,7 @@ tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
 cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
 sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
 sudo /etc/init.d/openibd restart || true
+if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print $5}' | xargs -I {} sudo ip link set dev {} up || true; fi
 
 # Wait for mn0 to export NFS and mount it
 echo "Waiting for mn0 NFS to be ready..."

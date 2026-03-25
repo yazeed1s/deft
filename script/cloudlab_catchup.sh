@@ -27,7 +27,7 @@ fi
 cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
 sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
 sudo /etc/init.d/openibd restart || true
-
+if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print $5}' | xargs -I {} sudo ip link set dev {} up; fi
 
 MN0_IP=$(hostname -I | awk '{print $1}')
 
@@ -45,7 +45,7 @@ for node in $CN_NODES; do
     # install packages
     ssh -o StrictHostKeyChecking=no $node "sudo apt-get update -q"
     ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential"
-    ssh -o StrictHostKeyChecking=no $node "cd /tmp && if [ ! -d \"MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64\" ]; then wget -q https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz && tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz; fi && cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force && sudo /etc/init.d/openibd restart || true"
+    ssh -o StrictHostKeyChecking=no $node "cd /tmp && if [ ! -d \"MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64\" ]; then wget -q https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz && tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz; fi && cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force && sudo /etc/init.d/openibd restart || true; if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi"
     
     # nfs mount
     ssh -o StrictHostKeyChecking=no $node "sudo mkdir -p /mydata"
