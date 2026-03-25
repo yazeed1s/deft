@@ -29,8 +29,8 @@ sudo chmod 777 /mydata
 if ! grep -q '/mydata' /etc/exports; then
     echo '/mydata *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
 fi
-sudo exportfs -a
-sudo systemctl restart nfs-kernel-server
+sudo exportfs -a || true
+sudo systemctl restart nfs-kernel-server || true
 
 echo "installing MLNX_OFED user-space headers on mn0..."
 cd /tmp
