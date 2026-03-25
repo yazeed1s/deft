@@ -112,7 +112,7 @@ for node in $CN_NODES; do
     fi
     
     # nfs mount
-    ssh -o StrictHostKeyChecking=no $node "[ -d /mydata ] || (sudo rm -f /mydata 2>/dev/null ; sudo mkdir -p /mydata)"
+    ssh -o StrictHostKeyChecking=no $node "(sudo umount -l /mydata 2>/dev/null ; sudo rm -rf /mydata 2>/dev/null ; sudo mkdir -p /mydata) || true"
     
     if ssh -o StrictHostKeyChecking=no $node "mount | grep -q '/mydata'"; then
         echo "$node already has /mydata mounted."
