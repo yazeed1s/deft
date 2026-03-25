@@ -36,17 +36,16 @@ REAL_GROUP=$(id -gn $REAL_USER)
 sudo mkdir -p /mydata/deft
 sudo chown -R $REAL_USER:$REAL_GROUP /mydata
 
-if [[ ! -f "/mydata/deft/CMakeLists.txt" ]]; then
-    if [[ -d "/local/repository" ]]; then
-        sudo cp -a /local/repository/. /mydata/deft/
-    elif [[ -f "CMakeLists.txt" ]]; then
-        sudo cp -a . /mydata/deft/
-    else
-        echo "error: cannot find repo folder"
-        exit 1
-    fi
-    sudo chown -R $REAL_USER:$REAL_GROUP /mydata/deft
+echo "syncing repository to /mydata/deft..."
+if [[ -d "/local/repository" ]]; then
+    sudo cp -ru /local/repository/. /mydata/deft/
+elif [[ -f "CMakeLists.txt" ]]; then
+    sudo cp -ru . /mydata/deft/
+else
+    echo "error: cannot find repo folder"
+    exit 1
 fi
+sudo chown -R $REAL_USER:$REAL_GROUP /mydata/deft
 
 cd /mydata/deft
 

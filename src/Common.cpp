@@ -1,4 +1,6 @@
 #include "Common.h"
+#include <string.h>
+#include <pthread.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -26,14 +28,19 @@ void bindCore(uint16_t core) {
 char *getIP() {
   struct ifreq ifr;
   int fd = socket(AF_INET, SOCK_DGRAM, 0);
-
   ifr.ifr_addr.sa_family = AF_INET;
-  strncpy(ifr.ifr_name, "ib0", IFNAMSIZ - 1);
 
-  ioctl(fd, SIOCGIFADDR, &ifr);
+  const char *ifaces[] = {"ib0", "eth1", "ens2", "eno1", "enp1s0f0"};
+  for (const char *iface : ifaces) {
+    strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
+    if (ioctl(fd, SIOCGIFADDR, &ifr) == 0) {
+      close(fd);
+      return inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
+    }
+  }
+
   close(fd);
-
-  return inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
+  return (char *)"0.0.0.0";
 }
 
 char *getMac() {
