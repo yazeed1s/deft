@@ -117,7 +117,7 @@ for node in $CN_NODES; do
 
         echo "copying ofed tarball from mn0 -> $node"
         scp -o StrictHostKeyChecking=no /tmp/"$OFED_TGZ" $node:/tmp/
-        ssh -o StrictHostKeyChecking=no $node "cd /tmp && rm -rf $OFED_DIR && tar xzf $OFED_TGZ && cd $OFED_DIR && sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update && sudo /etc/init.d/openibd restart || true && sudo ldconfig && ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && touch /tmp/.ofed_done"
+        ssh -o StrictHostKeyChecking=no $node "cd /tmp && rm -rf $OFED_DIR && tar xzf $OFED_TGZ && cd $OFED_DIR && sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update && (sudo /etc/init.d/openibd restart || true) && sudo ldconfig && ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && touch /tmp/.ofed_done"
     else
         echo "skip: rdma already healthy on $node"
     fi
