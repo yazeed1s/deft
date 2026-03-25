@@ -11,6 +11,28 @@ from itertools import product
 from time import gmtime, strftime
 from ssh_connect import ssh_command
 
+def dump_remote_log(ip, username, password, log_path, role, idx, lines=80):
+    cmd = (
+        "bash -lc '"
+        f"if [ -f \"{log_path}\" ]; then "
+        f"echo \"--- {role} {idx} log tail ({log_path}) ---\"; "
+        f"tail -n {lines} \"{log_path}\"; "
+        "else "
+        f"echo \"--- {role} {idx} log missing ({log_path}) ---\"; "
+        "fi'"
+    )
+    try:
+        ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
+        out = stdout.read().decode("utf-8", errors="replace").strip()
+        err = stderr.read().decode("utf-8", errors="replace").strip()
+        ssh.close()
+        if out:
+            print(out)
+        if err:
+            print(f"ssh stderr while reading {role} {idx} log on {ip}: {err}")
+    except Exception as e:
+        print(f"failed to fetch {role} {idx} log from {ip}: {e}")
+
 def get_res_name(s, postfix=""):
     if postfix:
         postfix = "-" + postfix
@@ -94,6 +116,7 @@ def main():
 
             server_sshs = []
             server_stdouts = []
+            server_stderrs = []
             for i in range(num_servers):
                 ip = g_cfg['servers'][i]['ip']
                 numa_id = g_cfg['servers'][i]['numa_id']
@@ -103,12 +126,14 @@ def main():
                 ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
                 server_sshs.append(ssh)
                 server_stdouts.append(stdout)
+                server_stderrs.append(stderr)
                 time.sleep(1)
 
             time.sleep(2)
 
             client_sshs = []
             client_stdouts = []
+            client_stderrs = []
             for i in range(num_clients):
                 ip = g_cfg['clients'][i]['ip']
                 numa_id = g_cfg['clients'][i]['numa_id']
@@ -117,37 +142,62 @@ def main():
                 ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
                 client_sshs.append(ssh)
                 client_stdouts.append(stdout)
+                client_stderrs.append(stderr)
                 time.sleep(1)
 
             print("waiting to finish...")
             finish = False
             has_error = False
+            server_exit_codes = [None] * num_servers
+            client_exit_codes = [None] * num_clients
             while not finish and not has_error:
                 time.sleep(2)
                 finish = True
                 for i in range(num_servers):
                     if server_stdouts[i].channel.exit_status_ready():
-                        if server_stdouts[i].channel.recv_exit_status() != 0:
+                        code = server_stdouts[i].channel.recv_exit_status()
+                        server_exit_codes[i] = code
+                        if code != 0:
                             has_error = True
-                            print(f'server {i} failed')
+                            print(f'server {i} failed with exit code {code}')
                             break
                     else:
                         finish = False
-                
+
                 if not has_error:
                     for i in range(num_clients):
                         if client_stdouts[i].channel.exit_status_ready():
-                            if client_stdouts[i].channel.recv_exit_status() != 0:
+                            code = client_stdouts[i].channel.recv_exit_status()
+                            client_exit_codes[i] = code
+                            if code != 0:
                                 has_error = True
-                                print(f'client {i} failed')
+                                print(f'client {i} failed with exit code {code}')
                                 break
                         else:
                             finish = False
 
             if has_error:
                 print("error: killing processes")
+                for i in range(num_servers):
+                    if server_stderrs[i].channel.recv_ready():
+                        stderr_msg = server_stderrs[i].read().decode("utf-8", errors="replace").strip()
+                        if stderr_msg:
+                            print(f'server {i} ssh stderr: {stderr_msg}')
+                    ip = g_cfg['servers'][i]['ip']
+                    abs_log = f'{g_cfg["src_path"]}/log/server_{i}.log'
+                    dump_remote_log(ip, username, password, abs_log, "server", i)
+
+                for i in range(num_clients):
+                    if client_stderrs[i].channel.recv_ready():
+                        stderr_msg = client_stderrs[i].read().decode("utf-8", errors="replace").strip()
+                        if stderr_msg:
+                            print(f'client {i} ssh stderr: {stderr_msg}')
+                    ip = g_cfg['clients'][i]['ip']
+                    abs_log = f'{g_cfg["src_path"]}/log/client_{i}.log'
+                    dump_remote_log(ip, username, password, abs_log, "client", i)
+
                 killall.killall()
-            
+
             for i in range(num_servers):
                 server_sshs[i].close()
             for i in range(num_clients):
