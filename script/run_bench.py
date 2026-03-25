@@ -33,6 +33,48 @@ def dump_remote_log(ip, username, password, log_path, role, idx, lines=80):
     except Exception as e:
         print(f"failed to fetch {role} {idx} log from {ip}: {e}")
 
+def check_hugepages(g_cfg):
+    username = g_cfg['username']
+    password = g_cfg['password']
+    ip_set = set()
+    failed = False
+
+    print("preflight: checking hugepages on all nodes...")
+    for node_list in [g_cfg['servers'], g_cfg['clients']]:
+        for node in node_list:
+            ip = node['ip']
+            if ip in ip_set:
+                continue
+            ip_set.add(ip)
+            cmd = "bash -lc 'cat /proc/sys/vm/nr_hugepages 2>/dev/null || echo -1'"
+            try:
+                ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
+                out = stdout.read().decode("utf-8", errors="replace").strip()
+                err = stderr.read().decode("utf-8", errors="replace").strip()
+                ssh.close()
+            except Exception as e:
+                print(f"preflight error on {ip}: cannot query hugepages ({e})")
+                failed = True
+                continue
+
+            try:
+                hp = int(out.splitlines()[-1]) if out else -1
+            except ValueError:
+                hp = -1
+
+            print(f"  node {ip}: vm.nr_hugepages={hp}")
+            if err:
+                print(f"  node {ip}: ssh stderr: {err}")
+
+            if hp <= 0:
+                failed = True
+
+    if failed:
+        print("preflight failed: hugepages are missing on one or more nodes.")
+        print("run: python3 ../script/all_hugepage.py")
+        return False
+    return True
+
 def get_res_name(s, postfix=""):
     if postfix:
         postfix = "-" + postfix
@@ -67,6 +109,8 @@ def main():
         sys.exit(1)
 
     print(f"topology: {num_servers} servers, {num_clients} clients")
+    if not check_hugepages(g_cfg):
+        sys.exit(1)
 
     if args.smoke:
         threads_CN_arr = [1]
