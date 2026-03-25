@@ -24,11 +24,11 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils autoconf automake libtool build-essential python3-paramiko python3-yaml
 
 echo "configuring nfs server on mn0..."
-sudo chmod 777 /local/repository
+sudo chmod 777 /mydata
 # Remove any existing /mydata or /local/repository exports to prevent duplicates
 sudo sed -i '/\/mydata/d' /etc/exports
 sudo sed -i '/\/local\/repository/d' /etc/exports
-echo '/local/repository *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
+echo '/mydata *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
 
 sudo systemctl enable rpcbind
 sudo systemctl restart rpcbind
@@ -112,14 +112,16 @@ for node in $CN_NODES; do
     fi
     
     # nfs mount
-    ssh -o StrictHostKeyChecking=no $node "(sudo umount -l /mydata 2>/dev/null ; sudo rm -rf /mydata 2>/dev/null ; sudo mkdir -p /mydata) || true"
+    ssh -o StrictHostKeyChecking=no $node "[ -d /mydata ] || sudo mkdir -p /mydata"
     
-    if ssh -o StrictHostKeyChecking=no $node "mount | grep -q '/mydata'"; then
-        echo "$node already has /mydata mounted."
+    if ssh -o StrictHostKeyChecking=no $node "mount | grep -q \"$MN0_IP:/mydata on /mydata\""; then
+        echo "$node already has /mydata mounted correctly."
     else
-        ssh -o StrictHostKeyChecking=no $node "sudo mount -t nfs $MN0_IP:/local/repository /mydata" || true
-        ssh -o StrictHostKeyChecking=no $node "grep -q '/mydata' /etc/fstab || echo \"$MN0_IP:/local/repository /mydata nfs defaults 0 0\" | sudo tee -a /etc/fstab" || true
-        echo "$node nfs mount complete."
+        ssh -o StrictHostKeyChecking=no $node "sudo umount -l /mydata 2>/dev/null ; sudo mount -t nfs $MN0_IP:/mydata /mydata" || true
+        ssh -o StrictHostKeyChecking=no $node "grep -q '/mydata' /etc/fstab || echo \"$MN0_IP:/mydata /mydata nfs defaults 0 0\" | sudo tee -a /etc/fstab" || true
+        # Update fstab if it had the old path
+        ssh -o StrictHostKeyChecking=no $node "sudo sed -i \"s|.*$MN0_IP:.* /mydata nfs.*|$MN0_IP:/mydata /mydata nfs defaults 0 0|\" /etc/fstab"
+        echo "$node nfs mount refreshed."
     fi
 done
 
