@@ -3,10 +3,10 @@ import geni.rspec.pg as pg
 
 pc = portal.Context()
 
-pc.defineParameter("NUM_MN", "Memory Nodes", portal.ParameterType.INTEGER, 2, "number of memory nodes")
-pc.defineParameter("NUM_CN", "Compute Nodes", portal.ParameterType.INTEGER, 6, "number of compute nodes")
-pc.defineParameter("NODE_TYPE", "Hardware Type", portal.ParameterType.STRING, "d6515", "node type (like d6515, r650)")
-pc.defineParameter("DISK_IMAGE", "Disk Image", portal.ParameterType.STRING, "urn:publicid:IDN+utah.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD", "os image")
+pc.defineParameter("NUM_MN", "Memory Nodes", portal.ParameterType.INTEGER, 2)
+pc.defineParameter("NUM_CN", "Compute Nodes", portal.ParameterType.INTEGER, 6)
+pc.defineParameter("NODE_TYPE", "Hardware Type", portal.ParameterType.STRING, "d6515")
+pc.defineParameter("DISK_IMAGE", "Disk Image", portal.ParameterType.STRING, "urn:publicid:IDN+utah.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD")
 
 params = pc.bindParameters()
 request = pc.makeRequestRSpec()
