@@ -23,6 +23,12 @@ set -e
 sudo apt-get update -q
 # Install required packages immediately at boot
 sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential
+cd /tmp
+wget -q https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
+tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
+cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
+sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
+sudo /etc/init.d/openibd restart || true
 
 # Setup NFS
 sudo mkdir -p /mydata
@@ -40,6 +46,12 @@ cn_setup = """
 set -e
 sudo apt-get update -q
 sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential
+cd /tmp
+wget -q https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
+tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
+cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
+sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
+sudo /etc/init.d/openibd restart || true
 
 # Wait for mn0 to export NFS and mount it
 echo "Waiting for mn0 NFS to be ready..."
