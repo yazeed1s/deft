@@ -98,7 +98,7 @@ def main():
                 ip = g_cfg['servers'][i]['ip']
                 numa_id = g_cfg['servers'][i]['numa_id']
                 print(f'start server {i} on {ip} (numa {numa_id})')
-                cmd = f'cd {exe_path} && sudo sh -c "echo 3 > /proc/sys/vm/drop_caches" && numactl --membind={numa_id} --cpunodebind={numa_id} ./{g_cfg["server_app"]} --server_count {num_servers} --client_count {num_clients} --numa_id {numa_id} &> ../log/server_{i}.log'
+                cmd = f'cd {exe_path} && sudo sh -c "echo 3 > /proc/sys/vm/drop_caches" && sudo numactl --membind={numa_id} --cpunodebind={numa_id} ./{g_cfg["server_app"]} --server_count {num_servers} --client_count {num_clients} --numa_id {numa_id} &> ../log/server_{i}.log'
 
                 ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
                 server_sshs.append(ssh)
@@ -113,7 +113,7 @@ def main():
                 ip = g_cfg['clients'][i]['ip']
                 numa_id = g_cfg['clients'][i]['numa_id']
                 print(f'start client {i} on {ip} (numa {numa_id})')
-                cmd = f'cd {exe_path} && numactl --membind={numa_id} --cpunodebind={numa_id} ./{g_cfg["client_app"]} --server_count {num_servers} --client_count {num_clients} --numa_id {numa_id} --num_prefill_threads {num_prefill_threads} --num_bench_threads {num_threads} --key_space {key_space} --read_ratio {read_ratio} --zipf {zipf} &> ../log/client_{i}.log'
+                cmd = f'cd {exe_path} && sudo numactl --membind={numa_id} --cpunodebind={numa_id} ./{g_cfg["client_app"]} --server_count {num_servers} --client_count {num_clients} --numa_id {numa_id} --num_prefill_threads {num_prefill_threads} --num_bench_threads {num_threads} --key_space {key_space} --read_ratio {read_ratio} --zipf {zipf} &> ../log/client_{i}.log'
                 ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
                 client_sshs.append(ssh)
                 client_stdouts.append(stdout)
