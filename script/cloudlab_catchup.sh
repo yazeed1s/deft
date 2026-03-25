@@ -45,6 +45,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev autoconf automake libtool build-essential python3-paramiko python3-yaml
 
 echo "configuring nfs server on mn0..."
+sudo mkdir -p /mydata
 sudo chmod 777 /mydata
 # Remove any existing /mydata or /local/repository exports to prevent duplicates
 sudo sed -i '/\/mydata/d' /etc/exports
