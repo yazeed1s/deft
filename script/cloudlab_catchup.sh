@@ -18,8 +18,9 @@ if ! grep -q "$(cat ~/.ssh/id_rsa.pub)" ~/.ssh/authorized_keys; then
 fi
 
 echo "installing packages on mn0..."
-sudo apt-get update -q
-sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
+sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true
+sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
 
 echo "installing MLNX_OFED user-space headers on mn0..."
 cd /tmp
@@ -29,7 +30,7 @@ if [ ! -f "/tmp/.ofed_done" ]; then
         tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
     fi
     cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64
-    sudo ./mlnxofedinstall --force --without-fw-update
+    sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update
     sudo /etc/init.d/openibd restart
     touch /tmp/.ofed_done
 else
@@ -68,14 +69,15 @@ for node in $CN_NODES; do
     echo "updating node: $node"
     
     # install packages
-    ssh -o StrictHostKeyChecking=no $node "sudo apt-get update -q"
-    ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml"
+    ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true"
+    ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get update -q"
+    ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml"
     
     # copy MLNX_OFED tarball directly from mn0 to avoid internet proxy lag
     if ssh -o StrictHostKeyChecking=no $node "[ ! -f /tmp/.ofed_done ]"; then
         echo "copying ofed tarball from mn0 -> $node"
         scp -o StrictHostKeyChecking=no /tmp/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz $node:/tmp/
-        ssh -o StrictHostKeyChecking=no $node "cd /tmp && tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz && cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --force --without-fw-update && sudo /etc/init.d/openibd restart && touch /tmp/.ofed_done"
+        ssh -o StrictHostKeyChecking=no $node "cd /tmp && tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz && cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update && sudo /etc/init.d/openibd restart && touch /tmp/.ofed_done"
     else
         echo "skip: mlnx_ofed loaded"
     fi
