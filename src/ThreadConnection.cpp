@@ -1,17 +1,29 @@
 #include "ThreadConnection.h"
 
 #include "connection.h"
+#include <cstdlib>
 
 ThreadConnection::ThreadConnection(uint16_t threadID, void *cachePool,
                                    uint64_t cacheSize, uint32_t machineNR,
                                    uint16_t rnic_id,
                                    RemoteConnectionToServer *remote_conn)
     : threadID(threadID), conn_to_server(remote_conn) {
-  createContext(&ctx, rnic_id);
+  if (!createContext(&ctx, rnic_id)) {
+    Debug::notifyError("createContext failed on client (rnic_id=%u)", rnic_id);
+    std::abort();
+  }
 
   cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
+  if (!cq) {
+    Debug::notifyError("ibv_create_cq failed on client");
+    std::abort();
+  }
   // rpc_cq = cq;
   rpc_cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
+  if (!rpc_cq) {
+    Debug::notifyError("ibv_create_cq (rpc_cq) failed on client");
+    std::abort();
+  }
 
   message = new RawMessageConnection(ctx, rpc_cq, APP_MESSAGE_NR);
 

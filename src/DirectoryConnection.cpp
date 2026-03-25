@@ -1,14 +1,22 @@
 #include "DirectoryConnection.h"
 
 #include "connection.h"
+#include <cstdlib>
 
 DirectoryConnection::DirectoryConnection(uint16_t dirID, void *dsmPool,
                                          uint64_t dsmSize, uint32_t num_client,
                                          uint16_t rnic_id,
                                          RemoteConnectionToClient *remote_con)
     : dirID(dirID), remote_con_(remote_con) {
-  createContext(&ctx, rnic_id);
+  if (!createContext(&ctx, rnic_id)) {
+    Debug::notifyError("createContext failed on server (rnic_id=%u)", rnic_id);
+    std::abort();
+  }
   cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
+  if (!cq) {
+    Debug::notifyError("ibv_create_cq failed on server");
+    std::abort();
+  }
   message = new RawMessageConnection(ctx, cq, DIR_MESSAGE_NR);
 
   message->initRecv();

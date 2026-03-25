@@ -9,7 +9,7 @@ bool createContext(RdmaContext *context, int rnic_id, uint8_t port,
 
   // get device names in the system
   int devicesNum;
-  int devIndex = 0;
+  int devIndex = -1;
   struct ibv_device **deviceList = ibv_get_device_list(&devicesNum);
   if (!deviceList) {
     Debug::notifyError("failed to get IB devices list");
@@ -31,7 +31,7 @@ bool createContext(RdmaContext *context, int rnic_id, uint8_t port,
     }
   }
 
-  if (devIndex >= devicesNum) {
+  if (devIndex < 0 || devIndex >= devicesNum) {
     Debug::notifyError("ib device wasn't found");
     goto CreateResourcesExit;
   }
