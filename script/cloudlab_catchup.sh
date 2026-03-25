@@ -58,11 +58,11 @@ fi
 MN0_IP=$(hostname -I | awk '{print $1}')
 
 echo "finding compute nodes..."
-CN_NODES=$(grep -oE "\bcn[0-9]+\b" /etc/hosts | sort | uniq)
+CN_NODES=$(grep -oE "\bcn[0-9]+\b" /etc/hosts | sort -ru)
 
 if [ -z "$CN_NODES" ]; then
-    echo "no cn nodes found in /etc/hosts. guessing cn0 cn1..."
-    CN_NODES="cn0 cn1"
+    echo "no cn nodes found in /etc/hosts. guessing cn2 cn1 cn0..."
+    CN_NODES="cn2 cn1 cn0"
 fi
 
 for node in $CN_NODES; do
