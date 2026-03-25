@@ -14,6 +14,7 @@ fi
 if ! grep -q "$(cat ~/.ssh/id_rsa.pub)" ~/.ssh/authorized_keys; then
     cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
     chmod 600 ~/.ssh/authorized_keys
+    chmod 700 ~/.ssh
 fi
 
 echo "installing packages on mn0..."
@@ -32,7 +33,7 @@ if [ ! -f "/tmp/.ofed_done" ]; then
     sudo /etc/init.d/openibd restart
     touch /tmp/.ofed_done
 else
-    echo "MLNX_OFED already installed on mn0."
+    echo "skip: mlnx_ofed loaded"
 fi
 if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print $5}' | xargs -I {} sudo ip link set dev {} up; fi
 
@@ -50,7 +51,7 @@ if [ ! -f "/tmp/.cityhash_done" ]; then
     sudo ldconfig
     touch /tmp/.cityhash_done
 else
-    echo "CityHash already installed on mn0."
+    echo "skip: cityhash loaded"
 fi
 
 MN0_IP=$(hostname -I | awk '{print $1}')
@@ -69,10 +70,26 @@ for node in $CN_NODES; do
     # install packages
     ssh -o StrictHostKeyChecking=no $node "sudo apt-get update -q"
     ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml"
-    ssh -o StrictHostKeyChecking=no $node "cd /tmp && if [ ! -f \"/tmp/.ofed_done\" ]; then if [ ! -d \"MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64\" ]; then wget -q http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz && tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz; fi && cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --force --without-fw-update && sudo /etc/init.d/openibd restart && touch /tmp/.ofed_done; else echo \"MLNX_OFED already installed.\"; fi; if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi"
     
-    # install cityhash natively (bypassing slow 'make check')
-    ssh -o StrictHostKeyChecking=no $node "cd /tmp && if [ ! -f \"/tmp/.cityhash_done\" ]; then if [ ! -d \"cityhash-master\" ]; then wget -q -O cityhash.tar.gz \"https://github.com/google/cityhash/archive/refs/heads/master.tar.gz\" && tar xzf cityhash.tar.gz; fi && cd cityhash-master && ./configure && make all CXXFLAGS=\"-g -O3\" && sudo make install && sudo ldconfig && touch /tmp/.cityhash_done; else echo \"CityHash already installed.\"; fi"
+    # copy MLNX_OFED tarball directly from mn0 to avoid internet proxy lag
+    if ssh -o StrictHostKeyChecking=no $node "[ ! -f /tmp/.ofed_done ]"; then
+        echo "copying ofed tarball from mn0 -> $node"
+        scp -o StrictHostKeyChecking=no /tmp/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz $node:/tmp/
+        ssh -o StrictHostKeyChecking=no $node "cd /tmp && tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz && cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --force --without-fw-update && sudo /etc/init.d/openibd restart && touch /tmp/.ofed_done"
+    else
+        echo "skip: mlnx_ofed loaded"
+    fi
+    ssh -o StrictHostKeyChecking=no $node "if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi"
+    
+    # push natively compiled CityHash modules from mn0 directly into local lib to avoid redundant make cycles
+    if ssh -o StrictHostKeyChecking=no $node "[ ! -f /tmp/.cityhash_done ]"; then
+        echo "copying cityhash from mn0 -> $node"
+        scp -o StrictHostKeyChecking=no /usr/local/include/city* $node:/tmp/
+        tar -cf - -C /usr/local/lib libcityhash.a libcityhash.la libcityhash.so libcityhash.so.0 libcityhash.so.0.0.0 | ssh -o StrictHostKeyChecking=no $node "tar -xf - -C /tmp/"
+        ssh -o StrictHostKeyChecking=no $node "sudo cp /tmp/city* /usr/local/include/ && sudo cp -P /tmp/libcityhash* /usr/local/lib/ && sudo ldconfig && touch /tmp/.cityhash_done"
+    else
+        echo "skip: cityhash loaded"
+    fi
     
     # nfs mount
     ssh -o StrictHostKeyChecking=no $node "sudo mkdir -p /mydata"
