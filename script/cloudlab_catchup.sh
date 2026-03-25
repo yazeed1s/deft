@@ -24,10 +24,9 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
 
 echo "configuring nfs server on mn0..."
-sudo mkdir -p /mydata
-sudo chmod 777 /mydata
-if ! grep -q '/mydata' /etc/exports; then
-    echo '/mydata *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
+sudo chmod 777 /local/repository
+if ! grep -q '/local/repository' /etc/exports; then
+    echo '/local/repository *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
 fi
 sudo exportfs -a || true
 sudo systemctl restart nfs-kernel-server || true
@@ -88,7 +87,7 @@ for node in $CN_NODES; do
     if ssh -o StrictHostKeyChecking=no $node "[ ! -f /tmp/.ofed_done ]"; then
         echo "copying ofed tarball from mn0 -> $node"
         scp -o StrictHostKeyChecking=no /tmp/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz $node:/tmp/
-        ssh -o StrictHostKeyChecking=no $node "cd /tmp && tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz && cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update && sudo /etc/init.d/openibd restart && touch /tmp/.ofed_done" || true
+        ssh -o StrictHostKeyChecking=no $node "cd /tmp && tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz && cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64 ; sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update ; sudo /etc/init.d/openibd restart ; touch /tmp/.ofed_done" || true
     else
         echo "skip: mlnx_ofed loaded"
     fi
@@ -99,7 +98,7 @@ for node in $CN_NODES; do
         echo "copying cityhash from mn0 -> $node"
         scp -o StrictHostKeyChecking=no /usr/local/include/city* $node:/tmp/
         tar -cf - -C /usr/local/lib libcityhash.a libcityhash.la libcityhash.so libcityhash.so.0 libcityhash.so.0.0.0 | ssh -o StrictHostKeyChecking=no $node "tar -xf - -C /tmp/" || true
-        ssh -o StrictHostKeyChecking=no $node "sudo cp /tmp/city* /usr/local/include/ && sudo cp -P /tmp/libcityhash* /usr/local/lib/ && sudo ldconfig && touch /tmp/.cityhash_done" || true
+        ssh -o StrictHostKeyChecking=no $node "sudo cp /tmp/city* /usr/local/include/ ; sudo cp -P /tmp/libcityhash* /usr/local/lib/ ; sudo ldconfig ; touch /tmp/.cityhash_done" || true
     else
         echo "skip: cityhash loaded"
     fi
@@ -110,8 +109,8 @@ for node in $CN_NODES; do
     if ssh -o StrictHostKeyChecking=no $node "mount | grep -q '/mydata'"; then
         echo "$node already has /mydata mounted."
     else
-        ssh -o StrictHostKeyChecking=no $node "sudo mount -t nfs $MN0_IP:/mydata /mydata"
-        ssh -o StrictHostKeyChecking=no $node "echo \"$MN0_IP:/mydata /mydata nfs defaults 0 0\" | sudo tee -a /etc/fstab"
+        ssh -o StrictHostKeyChecking=no $node "sudo mount -t nfs -o vers=3 $MN0_IP:/local/repository /mydata"
+        ssh -o StrictHostKeyChecking=no $node "echo \"$MN0_IP:/local/repository /mydata nfs vers=3,defaults 0 0\" | sudo tee -a /etc/fstab"
         echo "$node nfs mount complete."
     fi
 done
