@@ -175,7 +175,10 @@ def main():
                     f'cd {exe_path} && '
                     'sudo sh -c "echo 3 > /proc/sys/vm/drop_caches" && '
                     f'numactl --membind={numa_id} --cpunodebind={numa_id} '
-                    f'stdbuf -oL -eL env IBV_DRIVERS=mlx5 ./{g_cfg["server_app"]} '
+                    f'stdbuf -oL -eL env '
+                    'IBV_DRIVERS=mlx5 '
+                    'LD_LIBRARY_PATH=/usr/lib/libibverbs:/usr/lib/x86_64-linux-gnu/libibverbs:$LD_LIBRARY_PATH '
+                    f'./{g_cfg["server_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
                     f'--numa_id {numa_id} > ../log/server_{i}.log 2>&1'
                 )
@@ -198,7 +201,10 @@ def main():
                 cmd = (
                     f'cd {exe_path} && '
                     f'numactl --membind={numa_id} --cpunodebind={numa_id} '
-                    f'stdbuf -oL -eL env IBV_DRIVERS=mlx5 ./{g_cfg["client_app"]} '
+                    f'stdbuf -oL -eL env '
+                    'IBV_DRIVERS=mlx5 '
+                    'LD_LIBRARY_PATH=/usr/lib/libibverbs:/usr/lib/x86_64-linux-gnu/libibverbs:$LD_LIBRARY_PATH '
+                    f'./{g_cfg["client_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
                     f'--numa_id {numa_id} --num_prefill_threads {num_prefill_threads} '
                     f'--num_bench_threads {num_threads} --key_space {key_space} '
