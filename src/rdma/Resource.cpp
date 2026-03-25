@@ -1,4 +1,5 @@
 #include "Rdma.h"
+#include <cctype>
 
 bool createContext(RdmaContext *context, int rnic_id, uint8_t port,
                    int gidIndex) {
@@ -24,14 +25,37 @@ bool createContext(RdmaContext *context, int rnic_id, uint8_t port,
   // Debug::notifyInfo("Open IB Device");
 
   for (int i = 0; i < devicesNum; ++i) {
-    // printf("Device %d: %s\n", i, ibv_get_device_name(deviceList[i]));
-    if (ibv_get_device_name(deviceList[i])[5] == '0' + rnic_id) {
-      devIndex = i;
-      break;
+    const char *name = ibv_get_device_name(deviceList[i]);
+
+    // Old OFED naming style: mlx5_0, mlx5_1, ...
+    const char *uscore = strrchr(name, '_');
+    if (uscore && std::isdigit(*(uscore + 1)) && *(uscore + 2) == '\0') {
+      if ((*(uscore + 1) - '0') == rnic_id) {
+        devIndex = i;
+        break;
+      }
+    }
+
+    // New naming style: rocep1s0f0, rocep1s0f1, ...
+    size_t len = strlen(name);
+    if (len >= 2 && name[len - 2] == 'f' && std::isdigit(name[len - 1])) {
+      if ((name[len - 1] - '0') == rnic_id) {
+        devIndex = i;
+        break;
+      }
     }
   }
 
+  // Fallback: treat rnic_id as the verbs device index.
+  if (devIndex < 0 && rnic_id < devicesNum) {
+    devIndex = rnic_id;
+  }
+
   if (devIndex < 0 || devIndex >= devicesNum) {
+    for (int i = 0; i < devicesNum; ++i) {
+      Debug::notifyInfo("ib device %d: %s", i,
+                        ibv_get_device_name(deviceList[i]));
+    }
     Debug::notifyError("ib device wasn't found");
     goto CreateResourcesExit;
   }
