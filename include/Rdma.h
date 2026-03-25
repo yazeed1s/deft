@@ -6,6 +6,9 @@
 #include <assert.h>
 #include <cstring>
 #include <infiniband/verbs.h>
+#if __has_include(<infiniband/verbs_exp.h>)
+#include <infiniband/verbs_exp.h>
+#endif
 #include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -26,7 +29,7 @@ struct RdmaOpRegion {
   uint64_t dest;
   union {
     uint64_t size;
-    uint64_t log_sz;  // used for extended atomic
+    uint64_t log_sz; // used for extended atomic
   };
 
   uint32_t lkey;
@@ -90,7 +93,6 @@ bool modifyQPtoRTS(struct ibv_qp *qp);
 
 bool modifyUDtoRTS(struct ibv_qp *qp, RdmaContext *context);
 
-
 //// Operation.cpp
 int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc);
 int pollOnce(ibv_cq *cq, int pollNumber, struct ibv_wc *wc);
@@ -134,7 +136,6 @@ bool rdmaCompareAndSwapMask(ibv_qp *qp, uint64_t source, uint64_t dest,
 void rdmaQueryQueuePair(ibv_qp *qp);
 void checkDMSupported(struct ibv_context *ctx);
 
-
 //// specified
 bool rdmaWriteBatch(ibv_qp *qp, RdmaOpRegion *ror, int k, bool isSignaled,
                     uint64_t wrID = 0);
@@ -158,5 +159,5 @@ bool rdmaWriteFaa(ibv_qp *qp, const RdmaOpRegion &write_ror,
                   bool isSignaled, uint64_t wrID = 0);
 bool rdmaWriteCas(ibv_qp *qp, const RdmaOpRegion &write_ror,
                   const RdmaOpRegion &cas_ror, uint64_t compare, uint64_t swap,
-                  bool isSignaled, uint64_t wrID = 0);                 
+                  bool isSignaled, uint64_t wrID = 0);
 #endif

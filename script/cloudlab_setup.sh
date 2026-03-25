@@ -17,6 +17,12 @@ if ! command -v ibv_devinfo >/dev/null 2>&1; then
     exit 1
 fi
 
+if [[ ! -f "/usr/include/infiniband/verbs_exp.h" ]] || ! grep -q "ibv_exp_dct" /usr/include/infiniband/verbs_exp.h; then
+    echo "error: incompatible RDMA userspace headers for DEFT (missing ibv_exp_* API)."
+    echo "run: ./script/cloudlab_catchup.sh"
+    exit 1
+fi
+
 RDMA_DEVS=$(ibv_devinfo -l | grep -v "[0-9] HCAs" || true)
 if [[ -z "$RDMA_DEVS" ]]; then
     echo "warning: no rdma device found in ibv_devinfo."
