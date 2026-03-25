@@ -109,8 +109,8 @@ for node in $CN_NODES; do
     if ssh -o StrictHostKeyChecking=no $node "mount | grep -q '/mydata'"; then
         echo "$node already has /mydata mounted."
     else
-        ssh -o StrictHostKeyChecking=no $node "sudo mount -t nfs -o vers=3 $MN0_IP:/local/repository /mydata"
-        ssh -o StrictHostKeyChecking=no $node "echo \"$MN0_IP:/local/repository /mydata nfs vers=3,defaults 0 0\" | sudo tee -a /etc/fstab"
+        ssh -o StrictHostKeyChecking=no $node "sudo mount -t nfs $MN0_IP:/local/repository /mydata" || true
+        ssh -o StrictHostKeyChecking=no $node "echo \"$MN0_IP:/local/repository /mydata nfs defaults 0 0\" | sudo tee -a /etc/fstab" || true
         echo "$node nfs mount complete."
     fi
 done
