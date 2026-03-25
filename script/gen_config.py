@@ -44,8 +44,8 @@ def main():
     for ip in mn_ips:
         config['servers'].append({'ip': ip, 'numa_id': 0})
 
-    # usually we use numa 0 and 1 on clients
-    for numa_id in [0, 1]:
+    # single socket machines (like d6515) only have numa 0
+    for numa_id in [0]:
         for ip in cn_ips:
             config['clients'].append({'ip': ip, 'numa_id': numa_id})
 

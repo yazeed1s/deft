@@ -60,3 +60,15 @@ for node in $CN_NODES; do
 done
 
 echo "now run: sudo ./script/cloudlab_setup.sh"
+
+
+cd /tmp
+wget -q https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
+tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
+cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
+sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
+sudo /etc/init.d/openibd restart || true
+
+# Bring interfaces back up and restore IP mappings
+if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print $5}' | xargs -I {} sudo ip link set dev {} up; fi
+sudo /usr/local/etc/emulab/rc/rc.network restart
