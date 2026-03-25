@@ -21,14 +21,18 @@ echo "installing packages on mn0..."
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock
 sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils autoconf automake libtool build-essential python3-paramiko python3-yaml
 
 echo "configuring nfs server on mn0..."
 sudo chmod 777 /local/repository
-if ! grep -q '/local/repository' /etc/exports; then
-    echo '/local/repository *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
-fi
-sudo exportfs -a || true
+# Remove any existing /mydata or /local/repository exports to prevent duplicates
+sudo sed -i '/\/mydata/d' /etc/exports
+sudo sed -i '/\/local\/repository/d' /etc/exports
+echo '/local/repository *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
+
+sudo systemctl enable rpcbind
+sudo systemctl restart rpcbind
+sudo exportfs -arv || true
 sudo systemctl restart nfs-kernel-server || true
 
 echo "installing MLNX_OFED user-space headers on mn0..."
@@ -64,7 +68,11 @@ else
     echo "skip: cityhash loaded"
 fi
 
-MN0_IP=$(hostname -I | awk '{print $1}')
+MN0_IP=$(hostname -I | tr ' ' '\n' | grep '10.10.1.' | head -n 1)
+if [ -z "$MN0_IP" ]; then
+    MN0_IP=$(hostname -I | awk '{print $1}')
+fi
+echo "using mn0 ip: $MN0_IP"
 
 echo "finding compute nodes..."
 CN_NODES=$(grep -oE "\bcn[0-9]+\b" /etc/hosts | sort -ru)
@@ -81,7 +89,7 @@ for node in $CN_NODES; do
     ssh -o StrictHostKeyChecking=no $node "sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock"
     ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true"
     ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get update -q"
-    ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml"
+    ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils autoconf automake libtool build-essential python3-paramiko python3-yaml"
     
     # copy MLNX_OFED tarball directly from mn0 to avoid internet proxy lag
     if ssh -o StrictHostKeyChecking=no $node "[ ! -f /tmp/.ofed_done ]"; then
