@@ -2,6 +2,14 @@
 # update old cloudlab nodes to match new profile
 set -e
 
+OFED_DIR="MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64"
+OFED_TGZ="${OFED_DIR}.tgz"
+OFED_URL="http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/${OFED_TGZ}"
+
+has_rdma_hca() {
+    ibv_devinfo -l 2>/dev/null | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found'
+}
+
 if [[ "$(hostname)" != "mn0" && "$(hostname)" != mn0.* ]]; then
     echo "error: please run on mn0"
     exit 1
@@ -21,7 +29,7 @@ echo "installing packages on mn0..."
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock
 sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils autoconf automake libtool build-essential python3-paramiko python3-yaml
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev autoconf automake libtool build-essential python3-paramiko python3-yaml
 
 echo "configuring nfs server on mn0..."
 sudo chmod 777 /mydata
@@ -37,17 +45,28 @@ sudo systemctl restart nfs-kernel-server || true
 
 echo "installing MLNX_OFED user-space headers on mn0..."
 cd /tmp
-if [ ! -f "/tmp/.ofed_done" ]; then
-    if [ ! -d "MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64" ]; then
-        wget -q http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
-        tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
+if ! has_rdma_hca; then
+    echo "rdma not healthy on mn0; installing a clean OFED 4.9 userspace stack..."
+    sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y rdma-core libibverbs1 ibverbs-providers libmlx5-1 librdmacm1 ibverbs-utils infiniband-diags || true
+    sudo DEBIAN_FRONTEND=noninteractive apt-get -f install -y
+
+    if [ ! -f "$OFED_TGZ" ]; then
+        wget -q "$OFED_URL"
     fi
-    cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64
-    sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update || true
+    rm -rf "$OFED_DIR"
+    tar xzf "$OFED_TGZ"
+    cd "$OFED_DIR"
+    sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update
     sudo /etc/init.d/openibd restart || true
+    sudo ldconfig
+
+    if ! has_rdma_hca; then
+        echo "error: OFED install finished but no RDMA HCA is visible on mn0"
+        exit 1
+    fi
     touch /tmp/.ofed_done
 else
-    echo "skip: mlnx_ofed loaded"
+    echo "skip: rdma already healthy on mn0"
 fi
 if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print $5}' | xargs -I {} sudo ip link set dev {} up; fi
 
@@ -84,23 +103,26 @@ fi
 
 for node in $CN_NODES; do
     echo "updating node: $node"
-    
+
     # install packages
     ssh -o StrictHostKeyChecking=no $node "sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock"
     ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true"
     ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get update -q"
-    ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils autoconf automake libtool build-essential python3-paramiko python3-yaml"
-    
+    ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev autoconf automake libtool build-essential python3-paramiko python3-yaml"
+
     # copy MLNX_OFED tarball directly from mn0 to avoid internet proxy lag
-    if ssh -o StrictHostKeyChecking=no $node "[ ! -f /tmp/.ofed_done ]"; then
+    if ! ssh -o StrictHostKeyChecking=no $node "ibv_devinfo -l 2>/dev/null | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found'"; then
+        ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y rdma-core libibverbs1 ibverbs-providers libmlx5-1 librdmacm1 ibverbs-utils infiniband-diags || true"
+        ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get -f install -y"
+
         echo "copying ofed tarball from mn0 -> $node"
-        scp -o StrictHostKeyChecking=no /tmp/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz $node:/tmp/
-        ssh -o StrictHostKeyChecking=no $node "cd /tmp && tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz && cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64 ; sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update ; sudo /etc/init.d/openibd restart ; touch /tmp/.ofed_done" || true
+        scp -o StrictHostKeyChecking=no /tmp/"$OFED_TGZ" $node:/tmp/
+        ssh -o StrictHostKeyChecking=no $node "cd /tmp && rm -rf $OFED_DIR && tar xzf $OFED_TGZ && cd $OFED_DIR && sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update && sudo /etc/init.d/openibd restart || true && sudo ldconfig && ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && touch /tmp/.ofed_done"
     else
-        echo "skip: mlnx_ofed loaded"
+        echo "skip: rdma already healthy on $node"
     fi
     ssh -o StrictHostKeyChecking=no $node "if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi" || true
-    
+
     # push natively compiled CityHash modules from mn0 directly into local lib to avoid redundant make cycles
     if ssh -o StrictHostKeyChecking=no $node "[ ! -f /tmp/.cityhash_done ]"; then
         echo "copying cityhash from mn0 -> $node"
@@ -110,10 +132,10 @@ for node in $CN_NODES; do
     else
         echo "skip: cityhash loaded"
     fi
-    
+
     # nfs mount
     ssh -o StrictHostKeyChecking=no $node "(sudo umount -l /mydata 2>/dev/null ; sudo rm -rf /mydata 2>/dev/null ; sudo mkdir -p /mydata) || true"
-    
+
     if ssh -o StrictHostKeyChecking=no $node "mount | grep -q \"$MN0_IP:/mydata on /mydata\""; then
         echo "$node already has /mydata mounted correctly."
     else

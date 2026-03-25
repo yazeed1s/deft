@@ -9,11 +9,11 @@ fi
 
 echo "installing packages on mn0..."
 sudo apt-get update -q
-sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
+sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev autoconf automake libtool build-essential python3-paramiko python3-yaml
 
 echo "checking rdma..."
 if ! command -v ibv_devinfo >/dev/null 2>&1; then
-    echo "warning: ibv_devinfo missing. please install rdma tools."
+    echo "warning: ibv_devinfo missing. run ./script/cloudlab_catchup.sh first to install OFED userspace."
     exit 1
 fi
 
