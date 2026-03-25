@@ -23,6 +23,15 @@ sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
 
+echo "configuring nfs server on mn0..."
+sudo mkdir -p /mydata
+sudo chmod 777 /mydata
+if ! grep -q '/mydata' /etc/exports; then
+    echo '/mydata *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
+fi
+sudo exportfs -a
+sudo systemctl restart nfs-kernel-server
+
 echo "installing MLNX_OFED user-space headers on mn0..."
 cd /tmp
 if [ ! -f "/tmp/.ofed_done" ]; then
