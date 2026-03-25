@@ -7,7 +7,11 @@ if [[ "$(hostname)" != "mn0" && "$(hostname)" != mn0.* ]]; then
     exit 1
 fi
 
-echo "1. checking rdma..."
+echo "installing packages on mn0..."
+sudo apt-get update -q
+sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential
+
+echo "checking rdma..."
 if ! command -v ibv_devinfo >/dev/null 2>&1; then
     echo "warning: ibv_devinfo missing. please install rdma tools."
     exit 1
@@ -26,18 +30,22 @@ export CC=gcc-10
 export CXX=g++-10
 
 echo "2. copy files and install cityhash..."
-if [[ ! -d "/mydata/deft" ]]; then
-    sudo mkdir -p /mydata/deft
-    sudo chown -R $USER:$USER /mydata
+REAL_USER=${SUDO_USER:-$USER}
+REAL_GROUP=$(id -gn $REAL_USER)
+
+sudo mkdir -p /mydata/deft
+sudo chown -R $REAL_USER:$REAL_GROUP /mydata
+
+if [[ ! -f "/mydata/deft/CMakeLists.txt" ]]; then
     if [[ -d "/local/repository" ]]; then
-        cp -r /local/repository/* /mydata/deft/
+        sudo cp -a /local/repository/. /mydata/deft/
     elif [[ -f "CMakeLists.txt" ]]; then
-        cp -r ./* /mydata/deft/
-        cp -r ./.git /mydata/deft/ || true
+        sudo cp -a . /mydata/deft/
     else
         echo "error: cannot find repo folder"
         exit 1
     fi
+    sudo chown -R $REAL_USER:$REAL_GROUP /mydata/deft
 fi
 
 cd /mydata/deft

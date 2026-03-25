@@ -27,7 +27,7 @@ sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libn
 # Setup NFS
 sudo mkdir -p /mydata
 # Try to chown to regular user if possible
-sudo chown -R $USER:$USER /mydata || true
+sudo chmod 777 /mydata
 echo '/mydata *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
 sudo exportfs -a
 sudo systemctl restart nfs-kernel-server
@@ -49,7 +49,7 @@ done
 sudo mkdir -p /mydata
 sudo mount -t nfs mn0:/mydata /mydata
 echo "mn0:/mydata /mydata nfs defaults 0 0" | sudo tee -a /etc/fstab
-sudo chown -R $USER:$USER /mydata || true
+sudo chmod 777 /mydata
 """
 
 lan = request.LAN("deft-lan")

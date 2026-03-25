@@ -14,6 +14,10 @@ if [ ! -f ~/.ssh/id_rsa ]; then
     chmod 600 ~/.ssh/authorized_keys
 fi
 
+echo "installing packages on mn0..."
+sudo apt-get update -q
+sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential
+
 MN0_IP=$(hostname -I | awk '{print $1}')
 
 echo "finding compute nodes..."
