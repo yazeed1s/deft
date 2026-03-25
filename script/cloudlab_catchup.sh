@@ -18,6 +18,7 @@ if ! grep -q "$(cat ~/.ssh/id_rsa.pub)" ~/.ssh/authorized_keys; then
 fi
 
 echo "installing packages on mn0..."
+sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock
 sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
@@ -30,8 +31,8 @@ if [ ! -f "/tmp/.ofed_done" ]; then
         tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
     fi
     cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64
-    sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update
-    sudo /etc/init.d/openibd restart
+    sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update || true
+    sudo /etc/init.d/openibd restart || true
     touch /tmp/.ofed_done
 else
     echo "skip: mlnx_ofed loaded"
@@ -69,6 +70,7 @@ for node in $CN_NODES; do
     echo "updating node: $node"
     
     # install packages
+    ssh -o StrictHostKeyChecking=no $node "sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock"
     ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true"
     ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get update -q"
     ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml"
@@ -77,18 +79,18 @@ for node in $CN_NODES; do
     if ssh -o StrictHostKeyChecking=no $node "[ ! -f /tmp/.ofed_done ]"; then
         echo "copying ofed tarball from mn0 -> $node"
         scp -o StrictHostKeyChecking=no /tmp/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz $node:/tmp/
-        ssh -o StrictHostKeyChecking=no $node "cd /tmp && tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz && cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update && sudo /etc/init.d/openibd restart && touch /tmp/.ofed_done"
+        ssh -o StrictHostKeyChecking=no $node "cd /tmp && tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz && cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --basic --user-space-only --force --without-fw-update && sudo /etc/init.d/openibd restart && touch /tmp/.ofed_done" || true
     else
         echo "skip: mlnx_ofed loaded"
     fi
-    ssh -o StrictHostKeyChecking=no $node "if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi"
+    ssh -o StrictHostKeyChecking=no $node "if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi" || true
     
     # push natively compiled CityHash modules from mn0 directly into local lib to avoid redundant make cycles
     if ssh -o StrictHostKeyChecking=no $node "[ ! -f /tmp/.cityhash_done ]"; then
         echo "copying cityhash from mn0 -> $node"
         scp -o StrictHostKeyChecking=no /usr/local/include/city* $node:/tmp/
-        tar -cf - -C /usr/local/lib libcityhash.a libcityhash.la libcityhash.so libcityhash.so.0 libcityhash.so.0.0.0 | ssh -o StrictHostKeyChecking=no $node "tar -xf - -C /tmp/"
-        ssh -o StrictHostKeyChecking=no $node "sudo cp /tmp/city* /usr/local/include/ && sudo cp -P /tmp/libcityhash* /usr/local/lib/ && sudo ldconfig && touch /tmp/.cityhash_done"
+        tar -cf - -C /usr/local/lib libcityhash.a libcityhash.la libcityhash.so libcityhash.so.0 libcityhash.so.0.0.0 | ssh -o StrictHostKeyChecking=no $node "tar -xf - -C /tmp/" || true
+        ssh -o StrictHostKeyChecking=no $node "sudo cp /tmp/city* /usr/local/include/ && sudo cp -P /tmp/libcityhash* /usr/local/lib/ && sudo ldconfig && touch /tmp/.cityhash_done" || true
     else
         echo "skip: cityhash loaded"
     fi
