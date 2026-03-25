@@ -10,6 +10,8 @@ fi
 echo "setting up ssh keys so mn0 can talk to cn nodes..."
 if [ ! -f ~/.ssh/id_rsa ]; then
     ssh-keygen -m PEM -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa
+fi
+if ! grep -q "$(cat ~/.ssh/id_rsa.pub)" ~/.ssh/authorized_keys; then
     cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
     chmod 600 ~/.ssh/authorized_keys
 fi
@@ -20,26 +22,36 @@ sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libn
 
 echo "installing MLNX_OFED user-space headers on mn0..."
 cd /tmp
-if [ ! -d "MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64" ]; then
-    wget -q http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
-    tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
+if [ ! -f "/tmp/.ofed_done" ]; then
+    if [ ! -d "MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64" ]; then
+        wget -q http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
+        tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
+    fi
+    cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64
+    sudo ./mlnxofedinstall --force --without-fw-update
+    sudo /etc/init.d/openibd restart
+    touch /tmp/.ofed_done
+else
+    echo "MLNX_OFED already installed on mn0."
 fi
-cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64
-sudo ./mlnxofedinstall --force --without-fw-update
-sudo /etc/init.d/openibd restart
 if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print $5}' | xargs -I {} sudo ip link set dev {} up; fi
 
 echo "installing CityHash on mn0..."
 cd /tmp
-if [ ! -d "cityhash-master" ]; then
-    wget -q -O cityhash.tar.gz "https://github.com/google/cityhash/archive/refs/heads/master.tar.gz"
-    tar xzf cityhash.tar.gz
+if [ ! -f "/tmp/.cityhash_done" ]; then
+    if [ ! -d "cityhash-master" ]; then
+        wget -q -O cityhash.tar.gz "https://github.com/google/cityhash/archive/refs/heads/master.tar.gz"
+        tar xzf cityhash.tar.gz
+    fi
+    cd cityhash-master
+    ./configure
+    make all CXXFLAGS="-g -O3"
+    sudo make install
+    sudo ldconfig
+    touch /tmp/.cityhash_done
+else
+    echo "CityHash already installed on mn0."
 fi
-cd cityhash-master
-./configure
-make all CXXFLAGS="-g -O3"
-sudo make install
-sudo ldconfig
 
 MN0_IP=$(hostname -I | awk '{print $1}')
 
@@ -57,10 +69,10 @@ for node in $CN_NODES; do
     # install packages
     ssh -o StrictHostKeyChecking=no $node "sudo apt-get update -q"
     ssh -o StrictHostKeyChecking=no $node "sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml"
-    ssh -o StrictHostKeyChecking=no $node "cd /tmp && if [ ! -d \"MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64\" ]; then wget -q http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz && tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz; fi && cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --force --without-fw-update && sudo /etc/init.d/openibd restart; if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi"
+    ssh -o StrictHostKeyChecking=no $node "cd /tmp && if [ ! -f \"/tmp/.ofed_done\" ]; then if [ ! -d \"MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64\" ]; then wget -q http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz && tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz; fi && cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64 && sudo ./mlnxofedinstall --force --without-fw-update && sudo /etc/init.d/openibd restart && touch /tmp/.ofed_done; else echo \"MLNX_OFED already installed.\"; fi; if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi"
     
     # install cityhash natively (bypassing slow 'make check')
-    ssh -o StrictHostKeyChecking=no $node "cd /tmp && if [ ! -d \"cityhash-master\" ]; then wget -q -O cityhash.tar.gz \"https://github.com/google/cityhash/archive/refs/heads/master.tar.gz\" && tar xzf cityhash.tar.gz; fi && cd cityhash-master && ./configure && make all CXXFLAGS=\"-g -O3\" && sudo make install && sudo ldconfig"
+    ssh -o StrictHostKeyChecking=no $node "cd /tmp && if [ ! -f \"/tmp/.cityhash_done\" ]; then if [ ! -d \"cityhash-master\" ]; then wget -q -O cityhash.tar.gz \"https://github.com/google/cityhash/archive/refs/heads/master.tar.gz\" && tar xzf cityhash.tar.gz; fi && cd cityhash-master && ./configure && make all CXXFLAGS=\"-g -O3\" && sudo make install && sudo ldconfig && touch /tmp/.cityhash_done; else echo \"CityHash already installed.\"; fi"
     
     # nfs mount
     ssh -o StrictHostKeyChecking=no $node "sudo mkdir -p /mydata"
