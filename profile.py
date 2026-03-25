@@ -24,7 +24,7 @@ sudo apt-get update -q
 # Install required packages immediately at boot
 sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
 cd /tmp
-wget -q https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
+wget -q -4 https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
 tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
 cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
 sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
@@ -47,6 +47,16 @@ if command -v ibdev2netdev >/dev/null 2>&1; then
         fi
     fi
 fi
+
+# Install CityHash natively
+cd /tmp
+wget -q -4 -O cityhash.tar.gz "https://github.com/google/cityhash/archive/refs/heads/master.tar.gz"
+tar xzf cityhash.tar.gz
+cd cityhash-master
+./configure
+make all check CXXFLAGS="-g -O3"
+sudo make install
+sudo ldconfig
 
 # Setup NFS
 sudo mkdir -p /mydata
@@ -65,7 +75,7 @@ set -e
 sudo apt-get update -q
 sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
 cd /tmp
-wget -q https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
+wget -q -4 https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
 tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
 cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
 sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
@@ -88,6 +98,16 @@ if command -v ibdev2netdev >/dev/null 2>&1; then
         fi
     fi
 fi
+
+# Install CityHash natively
+cd /tmp
+wget -q -4 -O cityhash.tar.gz "https://github.com/google/cityhash/archive/refs/heads/master.tar.gz"
+tar xzf cityhash.tar.gz
+cd cityhash-master
+./configure
+make all check CXXFLAGS="-g -O3"
+sudo make install
+sudo ldconfig
 
 # Wait for mn0 to export NFS and mount it
 echo "Waiting for mn0 NFS to be ready..."
