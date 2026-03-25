@@ -5,3 +5,7 @@ global_config.sh
 global_config.yaml
 __pycache__/
 *.tex
+
+# CloudLab generated docs
+CLOUDLAB_QUICKSTART.md
+provision/cloudlab_automated_setup.md
