@@ -71,11 +71,14 @@ if ! has_rdma_hca || ! has_exp_verbs_api; then
     rm -rf "$OFED_DIR"
     tar xzf "$OFED_TGZ"
     cd "$OFED_DIR"
-    sudo ./mlnxofedinstall --basic --force --without-fw-update --yes
+    yes | sudo ./mlnxofedinstall --basic --force --without-fw-update
     sudo /etc/init.d/openibd restart || true
     sudo ldconfig
     load_rdma_modules
 
+    if ! command -v ofed_info >/dev/null 2>&1 || ! command -v ibv_devinfo >/dev/null 2>&1; then
+        echo "warning: ofed_info or ibv_devinfo missing after OFED install on mn0."
+    fi
     if ! has_rdma_hca || ! has_exp_verbs_api; then
         echo "warning: OFED install finished, but RDMA checks are not clean yet on mn0."
         echo "warning: this can happen right after openibd restart; continue and verify before build."
@@ -132,15 +135,21 @@ for node in $CN_NODES; do
     ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev autoconf automake libtool build-essential python3-paramiko python3-yaml"
 
     # copy MLNX_OFED tarball directly from mn0 to avoid internet proxy lag
-    if ! ssh -o StrictHostKeyChecking=no $node "command -v ibv_devinfo >/dev/null 2>&1 && ibv_devinfo -l 2>/dev/null | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q 'ibv_exp_dct' /usr/include/infiniband/verbs_exp.h"; then
+    if ! ssh -o StrictHostKeyChecking=no $node "command -v ofed_info >/dev/null 2>&1 && command -v ibv_devinfo >/dev/null 2>&1 && ibv_devinfo -l 2>/dev/null | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q 'ibv_exp_dct' /usr/include/infiniband/verbs_exp.h"; then
         ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y rdma-core libibverbs1 ibverbs-providers libmlx5-1 librdmacm1 ibverbs-utils infiniband-diags || true"
         ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get -f install -y"
 
+        if [ ! -f "/tmp/$OFED_TGZ" ]; then
+            echo "downloading OFED tarball on mn0..."
+            cd /tmp
+            wget -q "$OFED_URL"
+        fi
         echo "copying ofed tarball from mn0 -> $node"
         scp -o StrictHostKeyChecking=no /tmp/"$OFED_TGZ" $node:/tmp/
-        ssh -o StrictHostKeyChecking=no $node "cd /tmp && rm -rf $OFED_DIR && tar xzf $OFED_TGZ && cd $OFED_DIR && sudo ./mlnxofedinstall --basic --force --without-fw-update --yes && (sudo /etc/init.d/openibd restart || true) && sudo ldconfig && sudo modprobe mlx5_core || true && sudo modprobe mlx5_ib || true && sudo modprobe ib_uverbs || true && sudo modprobe ib_core || true && sudo modprobe rdma_cm || true && sudo modprobe iw_cm || true && touch /tmp/.ofed_done"
-        if ! ssh -o StrictHostKeyChecking=no $node "ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q 'ibv_exp_dct' /usr/include/infiniband/verbs_exp.h"; then
+        ssh -o StrictHostKeyChecking=no $node "cd /tmp && rm -rf $OFED_DIR && tar xzf $OFED_TGZ && cd $OFED_DIR && yes | sudo ./mlnxofedinstall --basic --force --without-fw-update > /tmp/ofed_install.log 2>&1 && (sudo /etc/init.d/openibd restart || true) && sudo ldconfig && sudo modprobe mlx5_core || true && sudo modprobe mlx5_ib || true && sudo modprobe ib_uverbs || true && sudo modprobe ib_core || true && sudo modprobe rdma_cm || true && sudo modprobe iw_cm || true && touch /tmp/.ofed_done"
+        if ! ssh -o StrictHostKeyChecking=no $node "command -v ofed_info >/dev/null 2>&1 && command -v ibv_devinfo >/dev/null 2>&1 && ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q 'ibv_exp_dct' /usr/include/infiniband/verbs_exp.h"; then
             echo "warning: post-install RDMA check is still not clean on $node; continuing."
+            ssh -o StrictHostKeyChecking=no $node "tail -n 80 /tmp/ofed_install.log 2>/dev/null || true" || true
         fi
     else
         echo "skip: rdma already healthy on $node"
