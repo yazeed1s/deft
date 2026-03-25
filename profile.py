@@ -24,9 +24,9 @@ sudo apt-get update -q
 # Install required packages immediately at boot
 sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
 cd /tmp
-wget -q -4 https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
-tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
-cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
+wget -q -4 http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
+tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
+cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64
 sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
 sudo /etc/init.d/openibd restart || true
 if command -v ibdev2netdev >/dev/null 2>&1; then
@@ -75,9 +75,9 @@ set -e
 sudo apt-get update -q
 sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
 cd /tmp
-wget -q -4 https://content.mellanox.com/ofed/MLNX_OFED-4.9-3.1.5.0/MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
-tar xzf MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64.tgz
-cd MLNX_OFED_LINUX-4.9-3.1.5.0-ubuntu20.04-x86_64
+wget -q -4 http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
+tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
+cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64
 sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
 sudo /etc/init.d/openibd restart || true
 if command -v ibdev2netdev >/dev/null 2>&1; then

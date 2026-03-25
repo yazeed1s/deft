@@ -19,6 +19,9 @@ def get_res_name(s, postfix=""):
 def main():
     parser = argparse.ArgumentParser(description="run deft benchmark")
     parser.add_argument("--smoke", action="store_true", help="run fast test")
+    parser.add_argument("--small", action="store_true", help="run small benchmark")
+    parser.add_argument("--mid", action="store_true", help="run medium benchmark")
+    parser.add_argument("--big", action="store_true", help="run big benchmark")
     parser.add_argument("--name", type=str, default="", help="name for result file")
     args, _ = parser.parse_known_args()
 
@@ -46,6 +49,21 @@ def main():
     if args.smoke:
         threads_CN_arr = [1]
         key_space_arr = [1000]
+        read_ratio_arr = [50]
+        zipf_arr = [0.99]
+    elif args.small:
+        threads_CN_arr = [5]
+        key_space_arr = [10e6]
+        read_ratio_arr = [50]
+        zipf_arr = [0.99]
+    elif args.mid:
+        threads_CN_arr = [15]
+        key_space_arr = [100e6]
+        read_ratio_arr = [50]
+        zipf_arr = [0.99]
+    elif args.big:
+        threads_CN_arr = [30]
+        key_space_arr = [400e6]
         read_ratio_arr = [50]
         zipf_arr = [0.99]
     else:
