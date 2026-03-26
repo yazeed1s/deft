@@ -5,6 +5,8 @@ set -e
 OFED_DIR="MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64"
 OFED_TGZ="${OFED_DIR}.tgz"
 OFED_URL="http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/${OFED_TGZ}"
+SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=8 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o BatchMode=yes -o PreferredAuthentications=publickey"
+SCP_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=8"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 has_rdma_hca() {
@@ -129,15 +131,15 @@ for node in $CN_NODES; do
     echo "updating node: $node"
 
     # install packages
-    ssh -o StrictHostKeyChecking=no $node "sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock"
-    ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true"
-    ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get update -q"
-    ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev autoconf automake libtool build-essential python3-paramiko python3-yaml"
+    ssh $SSH_OPTS $node "sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock"
+    ssh $SSH_OPTS $node "sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true"
+    ssh $SSH_OPTS $node "sudo DEBIAN_FRONTEND=noninteractive apt-get update -q"
+    ssh $SSH_OPTS $node "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev autoconf automake libtool build-essential python3-paramiko python3-yaml"
 
     # copy MLNX_OFED tarball directly from mn0 to avoid internet proxy lag
-    if ! ssh -o StrictHostKeyChecking=no $node "command -v ofed_info >/dev/null 2>&1 && command -v ibv_devinfo >/dev/null 2>&1 && ibv_devinfo -l 2>/dev/null | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q 'ibv_exp_dct' /usr/include/infiniband/verbs_exp.h"; then
-        ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y rdma-core libibverbs1 ibverbs-providers libmlx5-1 librdmacm1 ibverbs-utils infiniband-diags || true"
-        ssh -o StrictHostKeyChecking=no $node "sudo DEBIAN_FRONTEND=noninteractive apt-get -f install -y"
+    if ! ssh $SSH_OPTS $node "command -v ofed_info >/dev/null 2>&1 && command -v ibv_devinfo >/dev/null 2>&1 && ibv_devinfo -l 2>/dev/null | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q 'ibv_exp_dct' /usr/include/infiniband/verbs_exp.h"; then
+        ssh $SSH_OPTS $node "sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y rdma-core libibverbs1 ibverbs-providers libmlx5-1 librdmacm1 ibverbs-utils infiniband-diags || true"
+        ssh $SSH_OPTS $node "sudo DEBIAN_FRONTEND=noninteractive apt-get -f install -y"
 
         if [ ! -f "/tmp/$OFED_TGZ" ]; then
             echo "downloading OFED tarball on mn0..."
@@ -145,8 +147,8 @@ for node in $CN_NODES; do
             wget -q "$OFED_URL"
         fi
         echo "copying ofed tarball from mn0 -> $node"
-        scp -o StrictHostKeyChecking=no /tmp/"$OFED_TGZ" $node:/tmp/
-        ssh -o StrictHostKeyChecking=no "$node" "bash -s" <<'EOF'
+        scp $SCP_OPTS /tmp/"$OFED_TGZ" $node:/tmp/
+        ssh $SSH_OPTS "$node" "bash -s" <<'EOF'
 set -euo pipefail
 OFED_DIR="MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64"
 OFED_TGZ="${OFED_DIR}.tgz"
@@ -171,35 +173,35 @@ sudo modprobe rdma_cm || true
 sudo modprobe iw_cm || true
 touch /tmp/.ofed_done
 EOF
-        if ! ssh -o StrictHostKeyChecking=no $node "command -v ofed_info >/dev/null 2>&1 && command -v ibv_devinfo >/dev/null 2>&1 && ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q 'ibv_exp_dct' /usr/include/infiniband/verbs_exp.h"; then
+        if ! ssh $SSH_OPTS $node "command -v ofed_info >/dev/null 2>&1 && command -v ibv_devinfo >/dev/null 2>&1 && ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q 'ibv_exp_dct' /usr/include/infiniband/verbs_exp.h"; then
             echo "warning: post-install RDMA check is still not clean on $node; continuing."
-            ssh -o StrictHostKeyChecking=no $node "tail -n 80 /tmp/ofed_install.log 2>/dev/null || true" || true
+            ssh $SSH_OPTS $node "tail -n 80 /tmp/ofed_install.log 2>/dev/null || true" || true
         fi
     else
         echo "skip: rdma already healthy on $node"
     fi
-    ssh -o StrictHostKeyChecking=no $node "if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi" || true
-    ssh -o StrictHostKeyChecking=no $node "sudo modprobe mlx5_core || true; sudo modprobe mlx5_ib || true; sudo modprobe ib_uverbs || true; sudo modprobe ib_core || true; sudo modprobe rdma_cm || true; sudo modprobe iw_cm || true" || true
+    ssh $SSH_OPTS $node "if command -v ibdev2netdev >/dev/null 2>&1; then sudo ibdev2netdev | awk '{print \$5}' | xargs -I {} sudo ip link set dev {} up; fi" || true
+    ssh $SSH_OPTS $node "sudo modprobe mlx5_core || true; sudo modprobe mlx5_ib || true; sudo modprobe ib_uverbs || true; sudo modprobe ib_core || true; sudo modprobe rdma_cm || true; sudo modprobe iw_cm || true" || true
     # push natively compiled CityHash modules from mn0 directly into local lib to avoid redundant make cycles
-    if ssh -o StrictHostKeyChecking=no $node "[ ! -f /tmp/.cityhash_done ]"; then
+    if ssh $SSH_OPTS $node "[ ! -f /tmp/.cityhash_done ]"; then
         echo "copying cityhash from mn0 -> $node"
-        scp -o StrictHostKeyChecking=no /usr/local/include/city* $node:/tmp/
-        tar -cf - -C /usr/local/lib libcityhash.a libcityhash.la libcityhash.so libcityhash.so.0 libcityhash.so.0.0.0 | ssh -o StrictHostKeyChecking=no $node "tar -xf - -C /tmp/" || true
-        ssh -o StrictHostKeyChecking=no $node "sudo cp /tmp/city* /usr/local/include/ ; sudo cp -P /tmp/libcityhash* /usr/local/lib/ ; sudo ldconfig ; touch /tmp/.cityhash_done" || true
+        scp $SCP_OPTS /usr/local/include/city* $node:/tmp/
+        tar -cf - -C /usr/local/lib libcityhash.a libcityhash.la libcityhash.so libcityhash.so.0 libcityhash.so.0.0.0 | ssh $SSH_OPTS $node "tar -xf - -C /tmp/" || true
+        ssh $SSH_OPTS $node "sudo cp /tmp/city* /usr/local/include/ ; sudo cp -P /tmp/libcityhash* /usr/local/lib/ ; sudo ldconfig ; touch /tmp/.cityhash_done" || true
     else
         echo "skip: cityhash loaded"
     fi
 
     # nfs mount
-    ssh -o StrictHostKeyChecking=no $node "(sudo umount -l /mydata 2>/dev/null ; sudo rm -rf /mydata 2>/dev/null ; sudo mkdir -p /mydata) || true"
+    ssh $SSH_OPTS $node "(sudo umount -l /mydata 2>/dev/null ; sudo rm -rf /mydata 2>/dev/null ; sudo mkdir -p /mydata) || true"
 
-    if ssh -o StrictHostKeyChecking=no $node "mount | grep -q \"$MN0_IP:/mydata on /mydata\""; then
+    if ssh $SSH_OPTS $node "mount | grep -q \"$MN0_IP:/mydata on /mydata\""; then
         echo "$node already has /mydata mounted correctly."
     else
-        ssh -o StrictHostKeyChecking=no $node "sudo umount -l /mydata 2>/dev/null ; sudo mount -t nfs $MN0_IP:/mydata /mydata" || true
-        ssh -o StrictHostKeyChecking=no $node "grep -q '/mydata' /etc/fstab || echo \"$MN0_IP:/mydata /mydata nfs defaults 0 0\" | sudo tee -a /etc/fstab" || true
+        ssh $SSH_OPTS $node "sudo umount -l /mydata 2>/dev/null ; sudo mount -t nfs $MN0_IP:/mydata /mydata" || true
+        ssh $SSH_OPTS $node "grep -q '/mydata' /etc/fstab || echo \"$MN0_IP:/mydata /mydata nfs defaults 0 0\" | sudo tee -a /etc/fstab" || true
         # Update fstab if it had the old path
-        ssh -o StrictHostKeyChecking=no $node "sudo sed -i \"s|.*$MN0_IP:.* /mydata nfs.*|$MN0_IP:/mydata /mydata nfs defaults 0 0|\" /etc/fstab"
+        ssh $SSH_OPTS $node "sudo sed -i \"s|.*$MN0_IP:.* /mydata nfs.*|$MN0_IP:/mydata /mydata nfs defaults 0 0|\" /etc/fstab"
         echo "$node nfs mount refreshed."
     fi
 done
