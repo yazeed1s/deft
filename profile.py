@@ -8,7 +8,7 @@ pc.defineParameter("mn_count", "Memory Nodes", portal.ParameterType.INTEGER, 1)
 pc.defineParameter("cn_count", "Compute Nodes", portal.ParameterType.INTEGER, 5)
 pc.defineParameter("node_type", "Hardware Type", portal.ParameterType.STRING, "r650")
 pc.defineParameter("os_image", "Disk Image URN", portal.ParameterType.STRING,
-                   "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU18-64-STD")
+    "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD")
 
 params = pc.bindParameters()
 request = pc.makeRequestRSpec()
@@ -46,9 +46,9 @@ fi
 # Install MLNX_OFED 4.9-5.1.0.0 (User-space only)
 if [ ! -d "/usr/local/ofed" ]; then
     cd /tmp
-    wget -q http://content.mellanox.com/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64.tgz
-    tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64.tgz
-    cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64
+    wget -q http://content.mellanox.com/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
+    tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
+    cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64
     sudo ./mlnxofedinstall --user-space-only --force --quiet
     sudo /etc/init.d/openibd restart || true
 fi
