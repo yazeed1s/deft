@@ -48,12 +48,12 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev autoconf automake libtool build-essential python3-paramiko python3-yaml
 
 echo "configuring nfs server on mn0..."
-sudo mkdir -p /mydata
-sudo chmod 777 /mydata
-# Remove any existing /mydata or /local/repository exports to prevent duplicates
-sudo sed -i '/\/mydata/d' /etc/exports
+sudo mkdir -p /deft_code
+sudo chmod 777 /deft_code
+# Remove any existing /deft_code or /local/repository exports to prevent duplicates
+sudo sed -i '/\/deft_code/d' /etc/exports
 sudo sed -i '/\/local\/repository/d' /etc/exports
-echo '/mydata *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
+echo '/deft_code *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
 
 sudo systemctl enable rpcbind
 sudo systemctl restart rpcbind
@@ -193,15 +193,15 @@ EOF
     fi
 
     # nfs mount
-    ssh $SSH_OPTS $node "(sudo umount -l /mydata 2>/dev/null ; sudo rm -rf /mydata 2>/dev/null ; sudo mkdir -p /mydata) || true"
+    ssh $SSH_OPTS $node "(sudo umount -l /deft_code 2>/dev/null ; sudo rm -rf /deft_code 2>/dev/null ; sudo mkdir -p /deft_code) || true"
 
-    if ssh $SSH_OPTS $node "mount | grep -q \"$MN0_IP:/mydata on /mydata\""; then
-        echo "$node already has /mydata mounted correctly."
+    if ssh $SSH_OPTS $node "mount | grep -q \"$MN0_IP:/deft_code on /deft_code\""; then
+        echo "$node already has /deft_code mounted correctly."
     else
-        ssh $SSH_OPTS $node "sudo umount -l /mydata 2>/dev/null ; sudo mount -t nfs $MN0_IP:/mydata /mydata" || true
-        ssh $SSH_OPTS $node "grep -q '/mydata' /etc/fstab || echo \"$MN0_IP:/mydata /mydata nfs defaults 0 0\" | sudo tee -a /etc/fstab" || true
+        ssh $SSH_OPTS $node "sudo umount -l /deft_code 2>/dev/null ; sudo mount -t nfs $MN0_IP:/deft_code /deft_code" || true
+        ssh $SSH_OPTS $node "grep -q '/deft_code' /etc/fstab || echo \"$MN0_IP:/deft_code /deft_code nfs defaults 0 0\" | sudo tee -a /etc/fstab" || true
         # Update fstab if it had the old path
-        ssh $SSH_OPTS $node "sudo sed -i \"s|.*$MN0_IP:.* /mydata nfs.*|$MN0_IP:/mydata /mydata nfs defaults 0 0|\" /etc/fstab"
+        ssh $SSH_OPTS $node "sudo sed -i \"s|.*$MN0_IP:.* /deft_code nfs.*|$MN0_IP:/deft_code /deft_code nfs defaults 0 0|\" /etc/fstab"
         echo "$node nfs mount refreshed."
     fi
 done

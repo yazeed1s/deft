@@ -39,21 +39,21 @@ echo "2. copy files and install cityhash..."
 REAL_USER=${SUDO_USER:-$USER}
 REAL_GROUP=$(id -gn $REAL_USER)
 
-sudo mkdir -p /mydata/deft
-sudo chown -R $REAL_USER:$REAL_GROUP /mydata
+sudo mkdir -p /deft_code/deft
+sudo chown -R $REAL_USER:$REAL_GROUP /deft_code
 
-echo "syncing repository to /mydata/deft..."
+echo "syncing repository to /deft_code/deft..."
 if [[ -d "/local/repository" ]]; then
-    sudo cp -ru /local/repository/. /mydata/deft/
+    sudo cp -ru /local/repository/. /deft_code/deft/
 elif [[ -f "CMakeLists.txt" ]]; then
-    sudo cp -ru . /mydata/deft/
+    sudo cp -ru . /deft_code/deft/
 else
     echo "error: cannot find repo folder"
     exit 1
 fi
-sudo chown -R $REAL_USER:$REAL_GROUP /mydata/deft
+sudo chown -R $REAL_USER:$REAL_GROUP /deft_code/deft
 
-cd /mydata/deft
+cd /deft_code/deft
 
 if [[ ! -d "/usr/local/include/cityhash" ]] && ! ldconfig -p | grep libcityhash > /dev/null; then
     echo "building cityhash..."
@@ -67,7 +67,7 @@ if [[ ! -d "/usr/local/include/cityhash" ]] && ! ldconfig -p | grep libcityhash 
     make -j$(nproc)
     sudo make install
     sudo ldconfig
-    cd /mydata/deft
+    cd /deft_code/deft
 fi
 
 echo "3. we setup hugepage later in run script."

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-cd /mydata/deft/script
+cd /deft_code/deft/script
 
 if [[ ! -f "global_config.yaml" ]]; then
     echo "yaml config not found. running gen_config.py..."
