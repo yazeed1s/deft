@@ -3,141 +3,86 @@ import geni.rspec.pg as pg
 
 pc = portal.Context()
 
-pc.defineParameter("NUM_MN", "Memory Nodes", portal.ParameterType.INTEGER, 2)
-pc.defineParameter("NUM_CN", "Compute Nodes", portal.ParameterType.INTEGER, 6)
-pc.defineParameter("NODE_TYPE", "Hardware Type", portal.ParameterType.STRING, "d6515")
-pc.defineParameter(
-    "DISK_IMAGE",
-    "Disk Image",
-    portal.ParameterType.STRING,
-    "urn:publicid:IDN+utah.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD",
-)
-
+# Parameters
+pc.defineParameter("mn_count", "Memory Nodes", portal.ParameterType.INTEGER, 1)
+pc.defineParameter("cn_count", "Compute Nodes", portal.ParameterType.INTEGER, 5)
 params = pc.bindParameters()
+
 request = pc.makeRequestRSpec()
 
-NUM_MN = params.NUM_MN
-NUM_CN = params.NUM_CN
-NODE_TYPE = params.NODE_TYPE
-DISK_IMAGE = params.DISK_IMAGE
+NODE_TYPE = "r650"
+OS_IMAGE = "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU18-64-STD"
 
-if NUM_MN < 1:
-    pc.reportError(portal.ParameterError("NUM_MN must be >= 1"))
-if NUM_MN + NUM_CN > 254:
-    pc.reportError(portal.ParameterError("NUM_MN + NUM_CN must be <= 254"))
-pc.verifyParameters()
-
-# MN installation and NFS setup
-mn_setup = """
-#!/bin/bash
-set -e
-sudo apt-get update -q
-sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
-cd /tmp
-wget -q -4 http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
-tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
-cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64
-sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
-sudo /etc/init.d/openibd restart || true
-EXP_IFACE=$(ip -4 -o addr show | awk '$4 ~ /^10\\.10\\.1\\./ {print $2; exit}')
-if [[ -n "$EXP_IFACE" ]]; then
-    sudo ip link set dev "$EXP_IFACE" up || true
-    sudo ip link set dev "$EXP_IFACE" mtu 9000 || true
-fi
-
-cd /tmp
-wget -q -4 -O cityhash.tar.gz "https://github.com/google/cityhash/archive/refs/heads/master.tar.gz"
-tar xzf cityhash.tar.gz
-cd cityhash-master
-./configure
-make all check CXXFLAGS="-g -O3"
-sudo make install
-sudo ldconfig
-
-sudo mkdir -p /deft_code
-sudo chmod 777 /deft_code
-echo '/deft_code *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
-sudo exportfs -a
-sudo systemctl restart nfs-kernel-server
-echo 'nfs server ready' > /tmp/nfs_ready
-"""
-
-# CN installation and NFS mount
-cn_setup = """
-#!/bin/bash
-set -e
-sudo apt-get update -q
-sudo apt-get install -y nfs-common cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev ibverbs-utils infiniband-diags autoconf automake libtool build-essential python3-paramiko python3-yaml
-cd /tmp
-wget -q -4 http://www.mellanox.com/downloads/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
-tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
-cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64
-sudo ./mlnxofedinstall --basic --user-space-only --without-fw-update --force
-sudo /etc/init.d/openibd restart || true
-EXP_IFACE=$(ip -4 -o addr show | awk '$4 ~ /^10\\.10\\.1\\./ {print $2; exit}')
-if [[ -n "$EXP_IFACE" ]]; then
-    sudo ip link set dev "$EXP_IFACE" up || true
-    sudo ip link set dev "$EXP_IFACE" mtu 9000 || true
-fi
-
-cd /tmp
-wget -q -4 -O cityhash.tar.gz "https://github.com/google/cityhash/archive/refs/heads/master.tar.gz"
-tar xzf cityhash.tar.gz
-cd cityhash-master
-./configure
-make all check CXXFLAGS="-g -O3"
-sudo make install
-sudo ldconfig
-
-echo "Waiting for mn0 NFS to be ready..."
-while ! showmount -e 10.10.1.1 > /dev/null 2>&1; do
-    sleep 5
-done
-sudo mkdir -p /deft_code
-sudo mount -t nfs 10.10.1.1:/deft_code /deft_code
-echo "10.10.1.1:/deft_code /deft_code nfs defaults 0 0" | sudo tee -a /etc/fstab
-sudo chmod 777 /deft_code
-"""
-
-lan = request.LAN("deft-lan")
-lan.bandwidth = 100000  # 100 gbps
+# 100G RDMA LAN
+lan = request.LAN("rdma_lan")
+lan.bandwidth = 100000000
 lan.best_effort = True
-lan.vlan_tagging = True
-lan.link_multiplexing = True
 
-ip_idx = 1
 
-mn_nodes = []
-for i in range(NUM_MN):
-    mn = request.RawPC("mn{}".format(i))
-    mn.hardware_type = NODE_TYPE
-    mn.disk_image = DISK_IMAGE
+setup_script = """
+#!/bin/bash
+set -e
 
-    if i == 0:
-        mn.addService(pg.Execute(shell="bash", command=mn_setup))
-    else:
-        mn.addService(pg.Execute(shell="bash", command=cn_setup))
+#  System Dependencies
+sudo apt-get update
+sudo apt-get install -y python3 python3-pip python3-yaml python3-paramiko nfs-common cmake g++ libboost-all-dev memcached libgoogle-perftools-dev python3-yaml numactl git autoconf libtool build-essential libnuma-dev
 
-    iface = mn.addInterface("iface-mn{}".format(i))
-    iface.bandwidth = 100000
-    iface.addAddress(pg.IPv4Address("10.10.1.{}".format(ip_idx), "255.255.255.0"))
-    ip_idx += 1
+# Build CityHash from Source
+if [ ! -f /usr/local/lib/libcityhash.so ]; then
+    cd /tmp
+    git clone https://github.com/google/cityhash.git
+    cd cityhash
+    ./configure
+    make all check -j$(nproc)
+    sudo make install
+    sudo ldconfig
+fi
+
+# Install MLNX_OFED 4.9-5.1.0.0 (User-space only to prevent kernel crashes)
+if [ ! -d "/usr/local/ofed" ]; then
+    cd /tmp
+    wget -q http://content.mellanox.com/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64.tgz
+    tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64.tgz
+    cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64
+    sudo ./mlnxofedinstall --user-space-only --force --quiet
+    sudo /etc/init.d/openibd restart || true
+fi
+
+# NFS Setup for Coordination
+if [ "$(hostname)" == "mn0" ]; then
+    sudo apt-get install -y nfs-kernel-server
+    sudo mkdir -p /deft_share
+    sudo chmod 777 /deft_share
+    echo "/deft_share 10.10.1.0/24(rw,sync,no_subtree_check,no_root_squash)" | sudo tee -a /etc/exports
+    sudo exportfs -a
+    sudo systemctl restart nfs-kernel-server
+else
+    sudo mkdir -p /deft_share
+    # Wait for mn0 to come online
+    until ping -c1 10.10.1.1 >/dev/null 2>&1; do sleep 5; done
+    sudo mount -t nfs 10.10.1.1:/deft_share /deft_share
+    echo "10.10.1.1:/deft_share /deft_share nfs defaults 0 0" | sudo tee -a /etc/fstab
+fi
+"""
+
+def create_node(name, ip_suffix):
+    node = request.RawPC(name)
+    node.hardware_type = NODE_TYPE
+    node.disk_image = OS_IMAGE
+
+    # use the secondary interface for the RDMA LAN to avoid SSH lockouts
+    iface = node.addInterface("eth1")
+    iface.addAddress(pg.IPv4Address("10.10.1." + str(ip_suffix), "255.255.255.0"))
     lan.addInterface(iface)
-    mn_nodes.append(mn)
 
-cn_nodes = []
-for i in range(NUM_CN):
-    cn = request.RawPC("cn{}".format(i))
-    cn.hardware_type = NODE_TYPE
-    cn.disk_image = DISK_IMAGE
+    node.addService(pg.Execute(shell="bash", command=setup_script))
+    return node
 
-    cn.addService(pg.Execute(shell="bash", command=cn_setup))
 
-    iface = cn.addInterface("iface-cn{}".format(i))
-    iface.bandwidth = 100000
-    iface.addAddress(pg.IPv4Address("10.10.1.{}".format(ip_idx), "255.255.255.0"))
-    ip_idx += 1
-    lan.addInterface(iface)
-    cn_nodes.append(cn)
+for i in range(params.mn_count):
+    create_node("mn" + str(i), i + 1)
 
-pc.printRequestRSpec()
+for i in range(params.cn_count):
+    create_node("cn" + str(i), params.mn_count + i + 1)
+
+pc.printRequestRSpec(request)
