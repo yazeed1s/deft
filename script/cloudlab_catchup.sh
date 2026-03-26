@@ -146,7 +146,31 @@ for node in $CN_NODES; do
         fi
         echo "copying ofed tarball from mn0 -> $node"
         scp -o StrictHostKeyChecking=no /tmp/"$OFED_TGZ" $node:/tmp/
-        ssh -o StrictHostKeyChecking=no $node "cd /tmp && rm -rf $OFED_DIR && tar xzf $OFED_TGZ && cd $OFED_DIR && yes | sudo ./mlnxofedinstall --basic --force --without-fw-update > /tmp/ofed_install.log 2>&1 && (sudo /etc/init.d/openibd restart || true) && sudo ldconfig && sudo modprobe mlx5_core || true && sudo modprobe mlx5_ib || true && sudo modprobe ib_uverbs || true && sudo modprobe ib_core || true && sudo modprobe rdma_cm || true && sudo modprobe iw_cm || true && touch /tmp/.ofed_done"
+        ssh -o StrictHostKeyChecking=no "$node" "bash -s" <<'EOF'
+set -euo pipefail
+OFED_DIR="MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64"
+OFED_TGZ="${OFED_DIR}.tgz"
+
+cd /tmp
+rm -rf "$OFED_DIR"
+tar xzf "$OFED_TGZ"
+cd "$OFED_DIR"
+
+# Run non-interactively and stream output to both console and log
+timeout 900 sudo DEBIAN_FRONTEND=noninteractive ./mlnxofedinstall \
+  --basic --force --without-fw-update --skip-repo \
+  | tee /tmp/ofed_install.log
+
+sudo /etc/init.d/openibd restart || true
+sudo ldconfig
+sudo modprobe mlx5_core || true
+sudo modprobe mlx5_ib || true
+sudo modprobe ib_uverbs || true
+sudo modprobe ib_core || true
+sudo modprobe rdma_cm || true
+sudo modprobe iw_cm || true
+touch /tmp/.ofed_done
+EOF
         if ! ssh -o StrictHostKeyChecking=no $node "command -v ofed_info >/dev/null 2>&1 && command -v ibv_devinfo >/dev/null 2>&1 && ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found' && [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q 'ibv_exp_dct' /usr/include/infiniband/verbs_exp.h"; then
             echo "warning: post-install RDMA check is still not clean on $node; continuing."
             ssh -o StrictHostKeyChecking=no $node "tail -n 80 /tmp/ofed_install.log 2>/dev/null || true" || true
