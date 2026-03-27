@@ -151,14 +151,17 @@ for node in "${CLIENT_NODES[@]}"; do
         exit 1
     fi
     echo "  -> ${node} (${SSH_USER}@${target})"
+    retry 3 3 ssh ${SSH_OPTS} "${SSH_USER}@${target}" "echo ssh_ok >/dev/null"
     retry 6 5 ssh ${SSH_OPTS} "${SSH_USER}@${target}" "bash -s" -- "${SERVER_MOUNT_TARGET}" "${NFS_PATH}" <<'EOF'
 set -euo pipefail
 SERVER_TARGET="$1"
 NFS_PATH="$2"
-export DEBIAN_FRONTEND=noninteractive
 
-sudo apt-get update -q >/dev/null
-sudo apt-get install -y nfs-common >/dev/null
+if ! command -v mount.nfs >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    sudo apt-get update -q
+    sudo apt-get install -y nfs-common
+fi
 
 sudo mkdir -p "${NFS_PATH}"
 
