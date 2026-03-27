@@ -135,6 +135,35 @@ ensure_modern_cmake() {
     fi
 }
 
+ensure_modern_gcc() {
+    if command -v gcc-10 >/dev/null 2>&1 && command -v g++-10 >/dev/null 2>&1; then
+        echo "gcc-10/g++-10 already present."
+        return 0
+    fi
+
+    if apt-cache show g++-10 >/dev/null 2>&1 && apt-cache show gcc-10 >/dev/null 2>&1; then
+        echo "installing gcc-10/g++-10 from current apt sources..."
+        retry 5 10 sudo apt-get install -y gcc-10 g++-10
+    fi
+
+    if command -v gcc-10 >/dev/null 2>&1 && command -v g++-10 >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if [[ -r /etc/os-release ]]; then
+        . /etc/os-release
+        if [[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == 18.04 ]]; then
+            echo "enabling ubuntu-toolchain-r/test PPA for gcc-10 on Ubuntu 18.04..."
+            retry 5 10 sudo apt-get install -y software-properties-common
+            sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            retry 5 10 sudo apt-get update -q
+            retry 5 10 sudo apt-get install -y gcc-10 g++-10
+        fi
+    fi
+
+    command -v gcc-10 >/dev/null 2>&1 && command -v g++-10 >/dev/null 2>&1
+}
+
 if [[ "$(hostname)" != "mn0" && "$(hostname)" != mn0.* ]]; then
     echo "error: please run on mn0"
     exit 1
@@ -156,7 +185,7 @@ REQ_PKGS=(
     nfs-kernel-server cmake gcc g++
     libgflags-dev libnuma-dev numactl memcached libmemcached-dev
     libboost-all-dev autoconf automake libtool build-essential
-    python3-paramiko python3-yaml rsync wget
+    python3-paramiko python3-yaml rsync wget software-properties-common
 )
 MISSING_PKGS=()
 for p in "${REQ_PKGS[@]}"; do
@@ -172,15 +201,12 @@ else
     echo "all base packages already installed; skipping apt install."
 fi
 
-if ! command -v g++-10 >/dev/null 2>&1; then
-    if apt-cache show g++-10 >/dev/null 2>&1 && apt-cache show gcc-10 >/dev/null 2>&1; then
-        echo "installing gcc-10/g++-10 for reliable C++20 builds..."
-        retry 5 10 sudo apt-get install -y gcc-10 g++-10
-    fi
-fi
-
 if ! ensure_modern_cmake; then
     echo "error: unable to install a modern cmake version."
+    exit 1
+fi
+if ! ensure_modern_gcc; then
+    echo "error: unable to install gcc-10/g++-10 required for C++20."
     exit 1
 fi
 

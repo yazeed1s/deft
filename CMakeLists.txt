@@ -6,10 +6,10 @@ add_definitions(-DBOOST_COROUTINES_NO_DEPRECATION_WARNING)
 
 # Compiler/toolchain guards for C++20 features (e.g., <=>).
 if(CMAKE_VERSION VERSION_LESS 3.12)
-    message(FATAL_ERROR "CMake >= 3.12 is required for C++20 (found ${CMAKE_VERSION}). Use Ubuntu 20.04+ image.")
+    message(FATAL_ERROR "CMake >= 3.12 is required for C++20 (found ${CMAKE_VERSION}). Run script/cloudlab_setup.sh to bootstrap newer CMake.")
 endif()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 10)
-    message(FATAL_ERROR "GCC >= 10 is required for C++20 (found ${CMAKE_CXX_COMPILER_VERSION}). Use Ubuntu 20.04+ image.")
+    message(FATAL_ERROR "GCC >= 10 is required for C++20 (found ${CMAKE_CXX_COMPILER_VERSION}). Run script/cloudlab_setup.sh to bootstrap gcc-10.")
 endif()
 
 #Compiler options
