@@ -20,6 +20,44 @@ retry() {
     return 1
 }
 
+has_exp_verbs_api() {
+    [[ -f /usr/include/infiniband/verbs_exp.h ]] && grep -q "ibv_exp_dct" /usr/include/infiniband/verbs_exp.h
+}
+
+ensure_rdma_userspace() {
+    local ofed_ver="4.9-5.1.0.0"
+    local ofed_dir="MLNX_OFED_LINUX-${ofed_ver}-ubuntu18.04-x86_64"
+    local ofed_tgz="${ofed_dir}.tgz"
+    local ofed_url_primary="https://linux.mellanox.com/public/repo/mlnx_ofed/${ofed_ver}/ubuntu18.04-x86_64/${ofed_tgz}"
+    local ofed_url_fallback="http://content.mellanox.com/ofed/MLNX_OFED-${ofed_ver}/${ofed_tgz}"
+
+    if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
+        return 0
+    fi
+
+    echo "rdma userspace incomplete; installing distro rdma tools..."
+    retry 3 10 sudo apt-get install -y rdma-core ibverbs-utils infiniband-diags || true
+    if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
+        return 0
+    fi
+
+    echo "installing MLNX OFED userspace (${ofed_ver})..."
+    cd /tmp
+    if [[ ! -f "${ofed_tgz}" ]]; then
+        retry 3 10 wget -q -L -O "${ofed_tgz}" "${ofed_url_primary}" \
+            || retry 3 10 wget -q -L -O "${ofed_tgz}" "${ofed_url_fallback}" \
+            || return 1
+    fi
+    rm -rf "${ofed_dir}"
+    tar xzf "${ofed_tgz}"
+    cd "${ofed_dir}"
+    sudo ./mlnxofedinstall --user-space-only --force --without-fw-update --skip-repo || return 1
+    sudo /etc/init.d/openibd restart || true
+    sudo ldconfig
+
+    command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api
+}
+
 if [[ "$(hostname)" != "mn0" && "$(hostname)" != mn0.* ]]; then
     echo "error: please run on mn0"
     exit 1
@@ -40,15 +78,8 @@ retry 5 10 sudo apt-get install -y \
     python3-paramiko python3-yaml rsync
 
 echo "[2/6] checking rdma..."
-if ! command -v ibv_devinfo >/dev/null 2>&1; then
-    echo "error: ibv_devinfo missing."
-    echo "run: ./script/cloudlab_catchup.sh"
-    exit 1
-fi
-
-if [[ ! -f /usr/include/infiniband/verbs_exp.h ]] || ! grep -q "ibv_exp_dct" /usr/include/infiniband/verbs_exp.h; then
-    echo "error: incompatible RDMA userspace headers for DEFT (missing ibv_exp_* API)."
-    echo "run: ./script/cloudlab_catchup.sh"
+if ! ensure_rdma_userspace; then
+    echo "error: rdma userspace is still incomplete (missing ibv_devinfo or ibv_exp_* headers)."
     exit 1
 fi
 

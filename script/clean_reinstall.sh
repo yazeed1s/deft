@@ -1,5 +1,5 @@
 #!/bin/bash
-# Clean all nodes and re-run cloudlab_catchup.sh from scratch (no SSH key reset).
+# Clean all nodes and re-run cloudlab_setup.sh from scratch (no SSH key reset).
 set -euo pipefail
 
 NODES=${*:-"mn0 cn0 cn1 cn2"}
@@ -48,4 +48,4 @@ done
 
 echo "=== cleanup done ==="
 echo "run this next on mn0:"
-echo "  sudo /mydata/deft/script/cloudlab_catchup.sh"
+echo "  sudo /mydata/deft/script/cloudlab_setup.sh"
