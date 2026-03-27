@@ -254,15 +254,20 @@ fi
 
 echo "[5/6] building deft..."
 if command -v gcc-10 >/dev/null 2>&1 && command -v g++-10 >/dev/null 2>&1; then
-    export CC=gcc-10
-    export CXX=g++-10
+    export CC="$(command -v gcc-10)"
+    export CXX="$(command -v g++-10)"
 else
-    export CC=gcc
-    export CXX=g++
+    export CC="$(command -v gcc)"
+    export CXX="$(command -v g++)"
 fi
 mkdir -p "$DEFT_ROOT/build"
 cd "$DEFT_ROOT/build"
-cmake -DCMAKE_BUILD_TYPE=Release ..
+echo "using CC=${CC}"
+echo "using CXX=${CXX}"
+# CMake caches compiler choice in CMakeCache.txt; clear it so upgrades are picked up.
+rm -f CMakeCache.txt
+rm -rf CMakeFiles
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" ..
 make -j"$(nproc)"
 test -x ./server
 test -x ./client
