@@ -9,3 +9,5 @@ __pycache__/
 # CloudLab generated docs
 CLOUDLAB_QUICKSTART.md
 provision/cloudlab_automated_setup.md
+dicsovery.md
+towrite.md

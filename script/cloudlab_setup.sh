@@ -1,108 +1,134 @@
 #!/bin/bash
-# run on mn0 to setup everything
-set -e
+# Run on mn0 to prep build + SSH connectivity for benchmark scripts.
+set -euo pipefail
+
+LOG_FILE=/tmp/cloudlab_setup.log
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+retry() {
+    local attempts="$1"
+    local sleep_s="$2"
+    shift 2
+    local i
+    for i in $(seq 1 "$attempts"); do
+        if "$@"; then
+            return 0
+        fi
+        echo "retry $i/$attempts failed: $*"
+        sleep "$sleep_s"
+    done
+    return 1
+}
 
 if [[ "$(hostname)" != "mn0" && "$(hostname)" != mn0.* ]]; then
     echo "error: please run on mn0"
     exit 1
 fi
 
-echo "installing packages on mn0..."
-sudo apt-get update -q
-sudo apt-get install -y nfs-kernel-server cmake gcc-10 g++-10 libgflags-dev libnuma-dev numactl memcached libmemcached-dev libboost-all-dev autoconf automake libtool build-essential python3-paramiko python3-yaml
+REAL_USER=${SUDO_USER:-$USER}
+REAL_GROUP=$(id -gn "$REAL_USER")
+REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+DEFT_ROOT=/deft_code/deft
 
-echo "checking rdma..."
+echo "[1/6] installing packages on mn0..."
+export DEBIAN_FRONTEND=noninteractive
+retry 5 10 sudo apt-get update -q
+retry 5 10 sudo apt-get install -y \
+    nfs-kernel-server cmake gcc-10 g++-10 \
+    libgflags-dev libnuma-dev numactl memcached libmemcached-dev \
+    libboost-all-dev autoconf automake libtool build-essential \
+    python3-paramiko python3-yaml rsync
+
+echo "[2/6] checking rdma..."
 if ! command -v ibv_devinfo >/dev/null 2>&1; then
-    echo "warning: ibv_devinfo missing. run ./script/cloudlab_catchup.sh first to install OFED userspace."
+    echo "error: ibv_devinfo missing."
+    echo "run: ./script/cloudlab_catchup.sh"
     exit 1
 fi
 
-if [[ ! -f "/usr/include/infiniband/verbs_exp.h" ]] || ! grep -q "ibv_exp_dct" /usr/include/infiniband/verbs_exp.h; then
+if [[ ! -f /usr/include/infiniband/verbs_exp.h ]] || ! grep -q "ibv_exp_dct" /usr/include/infiniband/verbs_exp.h; then
     echo "error: incompatible RDMA userspace headers for DEFT (missing ibv_exp_* API)."
     echo "run: ./script/cloudlab_catchup.sh"
     exit 1
 fi
 
-RDMA_DEVS=$(ibv_devinfo -l | grep -v "[0-9] HCAs" || true)
-if [[ -z "$RDMA_DEVS" ]]; then
-    echo "warning: no rdma device found in ibv_devinfo."
-    echo "cloudlab using default drivers. deft works better with MLNX_OFED 4.9."
-    echo "install mlnx_ofed manually if needed."
-else
+if ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found'; then
     echo "ok: rdma device found"
+else
+    echo "warning: no rdma device found in ibv_devinfo output."
 fi
 
-export CC=gcc-10
-export CXX=g++-10
+echo "[3/6] syncing repository to ${DEFT_ROOT}..."
+sudo mkdir -p "$DEFT_ROOT"
+sudo chown "$REAL_USER:$REAL_GROUP" /deft_code "$DEFT_ROOT"
 
-echo "2. copy files and install cityhash..."
-REAL_USER=${SUDO_USER:-$USER}
-REAL_GROUP=$(id -gn $REAL_USER)
-
-sudo mkdir -p /deft_code/deft
-sudo chown -R $REAL_USER:$REAL_GROUP /deft_code
-
-echo "syncing repository to /deft_code/deft..."
-if [[ -d "/local/repository" ]]; then
-    sudo cp -ru /local/repository/. /deft_code/deft/
-elif [[ -f "CMakeLists.txt" ]]; then
-    sudo cp -ru . /deft_code/deft/
+if [[ -d /local/repository/.git ]]; then
+    sudo rsync -a --update --exclude build /local/repository/ "$DEFT_ROOT"/
+elif [[ -f CMakeLists.txt ]]; then
+    sudo rsync -a --update --exclude build ./ "$DEFT_ROOT"/
 else
-    echo "error: cannot find repo folder"
+    echo "error: cannot find repo source. expected /local/repository or current repo root."
     exit 1
 fi
-sudo chown -R $REAL_USER:$REAL_GROUP /deft_code/deft
 
-cd /deft_code/deft
+sudo chown -R "$REAL_USER:$REAL_GROUP" "$DEFT_ROOT"
+cd "$DEFT_ROOT"
 
-if [[ ! -d "/usr/local/include/cityhash" ]] && ! ldconfig -p | grep libcityhash > /dev/null; then
-    echo "building cityhash..."
+echo "[4/6] ensuring cityhash..."
+if ! ldconfig -p | grep -q libcityhash; then
     cd /tmp
-    if [ ! -d "cityhash" ]; then
+    if [[ ! -d cityhash ]]; then
         git clone https://github.com/google/cityhash.git
     fi
     cd cityhash
     autoreconf -if
     ./configure
-    make -j$(nproc)
+    make -j"$(nproc)"
     sudo make install
     sudo ldconfig
-    cd /deft_code/deft
 fi
 
-echo "3. we setup hugepage later in run script."
+echo "[5/6] building deft..."
+export CC=gcc-10
+export CXX=g++-10
+mkdir -p "$DEFT_ROOT/build"
+cd "$DEFT_ROOT/build"
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j"$(nproc)"
+test -x ./server
+test -x ./client
 
-echo "4. build deft..."
-mkdir -p build
-cd build
-if ! cmake -DCMAKE_BUILD_TYPE=Release .. ; then
-    echo "error: cmake failed"
+echo "[6/6] preparing passwordless ssh from ${REAL_USER}..."
+sudo -u "$REAL_USER" mkdir -p "${REAL_HOME}/.ssh"
+sudo -u "$REAL_USER" chmod 700 "${REAL_HOME}/.ssh"
+
+if [[ ! -f "${REAL_HOME}/.ssh/id_rsa" ]]; then
+    sudo -u "$REAL_USER" ssh-keygen -m PEM -t rsa -b 4096 -N "" -f "${REAL_HOME}/.ssh/id_rsa"
+fi
+
+PUB_KEY=$(sudo -u "$REAL_USER" cat "${REAL_HOME}/.ssh/id_rsa.pub")
+sudo -u "$REAL_USER" touch "${REAL_HOME}/.ssh/authorized_keys"
+sudo -u "$REAL_USER" chmod 600 "${REAL_HOME}/.ssh/authorized_keys"
+if ! sudo -u "$REAL_USER" grep -qxF "$PUB_KEY" "${REAL_HOME}/.ssh/authorized_keys"; then
+    printf '%s\n' "$PUB_KEY" | sudo -u "$REAL_USER" tee -a "${REAL_HOME}/.ssh/authorized_keys" >/dev/null
+fi
+
+mapfile -t CLUSTER_NODES < <(grep -oE '\b(mn|cn)[0-9]+\b' /etc/hosts | sort -u)
+SSH_FAIL=()
+for node in "${CLUSTER_NODES[@]}"; do
+    if [[ "$node" == "mn0" ]]; then
+        continue
+    fi
+    if ! sudo -u "$REAL_USER" ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 "$node" "hostname >/dev/null"; then
+        SSH_FAIL+=("$node")
+    fi
+done
+
+if [[ "${#SSH_FAIL[@]}" -gt 0 ]]; then
+    echo "error: passwordless ssh from mn0 failed for: ${SSH_FAIL[*]}"
+    echo "hint: make sure all nodes share authorized_keys, then rerun this script."
     exit 1
 fi
-if ! make -j$(nproc); then
-    echo "error: make failed"
-    exit 1
-fi
-cd ..
 
-echo "5. fix down rdma ports..."
-if command -v ibdev2netdev >/dev/null 2>&1; then
-    sudo ibdev2netdev | while read -r line; do
-        iface=$(echo "$line" | awk '{print $5}')
-        state=$(echo "$line" | awk '{print $6}')
-        if [[ "$state" == "(Down)" ]]; then
-            sudo ip link set dev "$iface" up
-        fi
-    done
-fi
-
-echo "done. deft is built."
-
-echo "6. setting up ssh keys covering all nodes..."
-if [ ! -f ~/.ssh/id_rsa ]; then
-    ssh-keygen -m PEM -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa
-    cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
-    chmod 600 ~/.ssh/authorized_keys
-fi
-
-echo "next run python3 gen_config.py in script folder."
+echo "done. build + ssh checks passed."
+echo "next: cd /deft_code/deft/script && python3 gen_config.py && ./cloudlab_run.sh --smoke"

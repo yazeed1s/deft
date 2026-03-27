@@ -8,7 +8,7 @@ pc.defineParameter("mn_count", "Memory Nodes", portal.ParameterType.INTEGER, 1)
 pc.defineParameter("cn_count", "Compute Nodes", portal.ParameterType.INTEGER, 5)
 pc.defineParameter("node_type", "Hardware Type", portal.ParameterType.STRING, "r650")
 pc.defineParameter("os_image", "Disk Image URN", portal.ParameterType.STRING,
-    "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD")
+                   "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU18-64-STD")
 
 params = pc.bindParameters()
 request = pc.makeRequestRSpec()
@@ -26,13 +26,12 @@ common_setup = """
 #!/bin/bash
 set -e
 
-# System Dependencies
+
 sudo apt-get update
 sudo apt-get install -y python3 python3-pip python3-yaml python3-paramiko nfs-common \
     cmake g++ libboost-all-dev memcached libgoogle-perftools-dev numactl git \
     autoconf libtool build-essential libnuma-dev
 
-# Build CityHash from Source
 if [ ! -f /usr/local/lib/libcityhash.so ]; then
     cd /tmp
     git clone https://github.com/google/cityhash.git
@@ -43,12 +42,12 @@ if [ ! -f /usr/local/lib/libcityhash.so ]; then
     sudo ldconfig
 fi
 
-# Install MLNX_OFED 4.9-5.1.0.0 (User-space only)
-if [ ! -d "/usr/local/ofed" ]; then
+
+if [ ! -d /usr/local/ofed ]; then
     cd /tmp
-    wget -q http://content.mellanox.com/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
-    tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64.tgz
-    cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu20.04-x86_64
+    wget -q http://content.mellanox.com/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64.tgz
+    tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64.tgz
+    cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64
     sudo ./mlnxofedinstall --user-space-only --force --quiet
     sudo /etc/init.d/openibd restart || true
 fi
@@ -56,23 +55,24 @@ fi
 
 # logic for the very first memory node (mn0)
 nfs_server_logic = """
-# NFS Setup for automated Benchmarking Coordination
 sudo apt-get install -y nfs-kernel-server
-sudo mkdir -p /deft_share
-sudo chmod 777 /deft_share
-echo "/deft_share 10.10.1.0/24(rw,sync,no_subtree_check,no_root_squash)" | sudo tee -a /etc/exports
-sudo exportfs -a
+sudo mkdir -p /deft_code
+sudo chmod 777 /deft_code
+sudo sed -i '/\\/deft_code /d' /etc/exports
+echo '/deft_code *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
+sudo exportfs -arv
 sudo systemctl restart nfs-kernel-server
 """
 
 # logic for all other nodes
 nfs_client_logic = """
-# NFS Client setup
-sudo mkdir -p /deft_share
-# Wait for mn0 (10.10.1.1) to be reachable
-until ping -c1 10.10.1.1 >/dev/null 2>&1; do sleep 5; done
-sudo mount -t nfs 10.10.1.1:/deft_share /deft_share
-echo "10.10.1.1:/deft_share /deft_share nfs defaults 0 0" | sudo tee -a /etc/fstab
+sudo mkdir -p /deft_code
+for i in $(seq 1 60); do
+    showmount -e mn0 2>/dev/null | grep -q '/deft_code' && break
+    sleep 5
+done
+mountpoint -q /deft_code || sudo mount -t nfs mn0:/deft_code /deft_code
+grep -q '/deft_code ' /etc/fstab || echo 'mn0:/deft_code /deft_code nfs defaults,_netdev 0 0' | sudo tee -a /etc/fstab
 """
 
 def create_node(name, ip_suffix, is_first_mn):
