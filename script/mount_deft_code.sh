@@ -5,6 +5,7 @@ set -euo pipefail
 NFS_PATH="${1:-/deft_code}"
 SERVER_NODE="${2:-mn0}"
 SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8"
+SSH_USER="${SUDO_USER:-$USER}"
 
 retry() {
     local attempts="$1"
@@ -23,22 +24,50 @@ retry() {
 
 get_ssh_target() {
     local short_node="$1"
+    local map_file
     local fqdn
-    fqdn=$(awk -v n="$short_node" '
-        $0 ~ ("(^|[[:space:]])" n "([[:space:]]|$)") {
-            for (i = 2; i <= NF; i++) {
-                if ($i ~ /\.cloudlab\.us$/) {
-                    print $i
-                    exit
+
+    for map_file in /var/emulab/boot/hostmap /etc/hosts; do
+        if [[ -f "${map_file}" ]]; then
+            fqdn=$(awk -v n="$short_node" '
+                $0 ~ ("(^|[[:space:]])" n "([[:space:]]|$)") {
+                    for (i = 2; i <= NF; i++) {
+                        if ($i ~ /\.cloudlab\.us$/) {
+                            print $i
+                            exit
+                        }
+                    }
                 }
-            }
-        }
-    ' /etc/hosts)
-    if [[ -n "${fqdn}" ]]; then
+            ' "${map_file}")
+            if [[ -n "${fqdn}" ]]; then
+                echo "${fqdn}"
+                return 0
+            fi
+        fi
+    done
+
+    # Fallback to short node name.
+    echo "${short_node}"
+}
+
+can_reach_ssh_port() {
+    local host="$1"
+    timeout 3 bash -c "cat < /dev/null > /dev/tcp/${host}/22" >/dev/null 2>&1
+}
+
+pick_reachable_target() {
+    local short_node="$1"
+    local fqdn
+    fqdn="$(get_ssh_target "${short_node}")"
+    if can_reach_ssh_port "${fqdn}"; then
         echo "${fqdn}"
-    else
-        echo "${short_node}"
+        return 0
     fi
+    if can_reach_ssh_port "${short_node}"; then
+        echo "${short_node}"
+        return 0
+    fi
+    return 1
 }
 
 if [[ "$(hostname)" != "${SERVER_NODE}" && "$(hostname)" != "${SERVER_NODE}."* ]]; then
@@ -81,9 +110,13 @@ fi
 
 echo "[3/4] mounting ${NFS_PATH} on client nodes..."
 for node in "${CLIENT_NODES[@]}"; do
-    target=$(get_ssh_target "${node}")
-    echo "  -> ${node} (${target})"
-    retry 6 5 ssh ${SSH_OPTS} "${target}" "bash -s" -- "${SERVER_NODE}" "${NFS_PATH}" <<'EOF'
+    if ! target="$(pick_reachable_target "${node}")"; then
+        echo "error: cannot reach ssh port on ${node} (or mapped FQDN)."
+        echo "hint: check /etc/hosts and /var/emulab/boot/hostmap on mn0, and verify mn->cn ssh."
+        exit 1
+    fi
+    echo "  -> ${node} (${SSH_USER}@${target})"
+    retry 6 5 ssh ${SSH_OPTS} "${SSH_USER}@${target}" "bash -s" -- "${SERVER_NODE}" "${NFS_PATH}" <<'EOF'
 set -euo pipefail
 SERVER_NODE="$1"
 NFS_PATH="$2"
@@ -115,8 +148,8 @@ echo "[4/4] validation..."
 echo "server exports:"
 showmount -e localhost
 for node in "${CLIENT_NODES[@]}"; do
-    target=$(get_ssh_target "${node}")
-    ssh ${SSH_OPTS} "${target}" "findmnt -n -o SOURCE,TARGET --target '${NFS_PATH}' || true"
+    target="$(get_ssh_target "${node}")"
+    ssh ${SSH_OPTS} "${SSH_USER}@${target}" "findmnt -n -o SOURCE,TARGET --target '${NFS_PATH}' || true"
 done
 
 echo "done: ${NFS_PATH} is exported from ${SERVER_NODE} and mounted on all discovered nodes."
