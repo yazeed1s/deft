@@ -8,7 +8,7 @@ pc.defineParameter("mn_count", "Memory Nodes", portal.ParameterType.INTEGER, 1)
 pc.defineParameter("cn_count", "Compute Nodes", portal.ParameterType.INTEGER, 5)
 pc.defineParameter("node_type", "Hardware Type", portal.ParameterType.STRING, "r650")
 pc.defineParameter("os_image", "Disk Image URN", portal.ParameterType.STRING,
-                   "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU18-64-STD")
+                   "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU22-64-STD")
 
 params = pc.bindParameters()
 request = pc.makeRequestRSpec()
@@ -27,7 +27,27 @@ lan.vlan_tagging = True
 # Common dependencies and builds required for Deft
 common_setup = """
 #!/bin/bash
-set -e
+set -euo pipefail
+
+retry() {
+    local attempts="$1"
+    local sleep_s="$2"
+    shift 2
+    local i
+    for i in $(seq 1 "$attempts"); do
+        "$@" && return 0
+        sleep "$sleep_s"
+    done
+    return 1
+}
+
+has_exp_verbs_api() {
+    [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q "ibv_exp_dct" /usr/include/infiniband/verbs_exp.h
+}
+
+has_ofed_49() {
+    command -v ofed_info >/dev/null 2>&1 && ofed_info -s 2>/dev/null | grep -q "MLNX_OFED_LINUX-4.9-5.1.0.0"
+}
 
 # Ensure experiment-LAN IP exists (some single-NIC Clemson nodes miss it at boot).
 SHORT_HOST=$(hostname -s)
@@ -45,15 +65,27 @@ if [ -n "$TARGET_IP" ] && ! ip -4 -o addr show | grep -q "10\\.10\\.1\\."; then
     fi
 fi
 
+export DEBIAN_FRONTEND=noninteractive
+# Heal interrupted apt/dpkg state before installs.
+sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock || true
+sudo dpkg --configure -a || true
+sudo apt-get -f install -y || true
 
-sudo apt-get update
-sudo apt-get install -y python3 python3-pip python3-yaml python3-paramiko nfs-common \
-    cmake g++ libboost-all-dev memcached libgoogle-perftools-dev numactl git \
-    autoconf libtool build-essential libnuma-dev
+REQ_PKGS="python3 python3-pip python3-yaml python3-paramiko nfs-common \
+cmake gcc g++ libboost-all-dev memcached libgoogle-perftools-dev numactl git \
+autoconf automake libtool build-essential libnuma-dev rdma-core ibverbs-utils infiniband-diags wget curl"
+MISSING=""
+for p in $REQ_PKGS; do
+    dpkg -s "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
+done
+if [ -n "$MISSING" ]; then
+    retry 5 10 sudo apt-get update -q
+    retry 5 10 sudo apt-get install -y $MISSING
+fi
 
 if [ ! -f /usr/local/lib/libcityhash.so ]; then
     cd /tmp
-    git clone https://github.com/google/cityhash.git
+    [ -d cityhash ] || git clone https://github.com/google/cityhash.git
     cd cityhash
     ./configure
     make all check -j$(nproc)
@@ -61,14 +93,27 @@ if [ ! -f /usr/local/lib/libcityhash.so ]; then
     sudo ldconfig
 fi
 
-
-if [ ! -d /usr/local/ofed ]; then
-    cd /tmp
-    wget -q http://content.mellanox.com/ofed/MLNX_OFED-4.9-5.1.0.0/MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64.tgz
-    tar xzf MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64.tgz
-    cd MLNX_OFED_LINUX-4.9-5.1.0.0-ubuntu18.04-x86_64
-    sudo ./mlnxofedinstall --user-space-only --force --quiet
+if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
+    :
+elif has_ofed_49; then
     sudo /etc/init.d/openibd restart || true
+    sudo ldconfig || true
+elif ! has_ofed_49; then
+    OFED_OS=$(awk -F= '/^VERSION_ID=/{gsub(/"/,"",$2); if ($2 ~ /^20/) print "ubuntu20.04"; else print "ubuntu18.04"}' /etc/os-release)
+    OFED_DIR="MLNX_OFED_LINUX-4.9-5.1.0.0-${OFED_OS}-x86_64"
+    OFED_TGZ="${OFED_DIR}.tgz"
+    OFED_URL1="https://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}-x86_64/${OFED_TGZ}"
+    OFED_URL2="http://content.mellanox.com/ofed/MLNX_OFED-4.9-5.1.0.0/${OFED_TGZ}"
+    cd /tmp
+    if [ ! -f "$OFED_TGZ" ]; then
+        retry 3 10 wget -q -L -O "$OFED_TGZ" "$OFED_URL1" || retry 3 10 wget -q -L -O "$OFED_TGZ" "$OFED_URL2"
+    fi
+    rm -rf "$OFED_DIR"
+    tar xzf "$OFED_TGZ"
+    cd "$OFED_DIR"
+    sudo ./mlnxofedinstall --user-space-only --force --without-fw-update --skip-repo
+    sudo /etc/init.d/openibd restart || true
+    sudo ldconfig
 fi
 """
 

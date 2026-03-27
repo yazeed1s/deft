@@ -24,6 +24,10 @@ has_exp_verbs_api() {
     [[ -f /usr/include/infiniband/verbs_exp.h ]] && grep -q "ibv_exp_dct" /usr/include/infiniband/verbs_exp.h
 }
 
+has_ofed_49() {
+    command -v ofed_info >/dev/null 2>&1 && ofed_info -s 2>/dev/null | grep -q "MLNX_OFED_LINUX-4.9-5.1.0.0"
+}
+
 ensure_rdma_userspace() {
     local ofed_ver="4.9-5.1.0.0"
     local ofed_dir="MLNX_OFED_LINUX-${ofed_ver}-ubuntu18.04-x86_64"
@@ -32,12 +36,27 @@ ensure_rdma_userspace() {
     local ofed_url_fallback="http://content.mellanox.com/ofed/MLNX_OFED-${ofed_ver}/${ofed_tgz}"
 
     if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
+        echo "rdma userspace already present; skipping install."
         return 0
+    fi
+
+    # If OFED 4.9 is already installed, do not reinstall it in setup.
+    # Try a lightweight refresh, then fail with guidance if still incomplete.
+    if has_ofed_49; then
+        echo "MLNX_OFED 4.9 already installed; skipping reinstall."
+        sudo /etc/init.d/openibd restart || true
+        sudo ldconfig || true
+        if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
+            return 0
+        fi
+        echo "existing OFED install is present but rdma tools/headers are incomplete."
+        return 1
     fi
 
     echo "rdma userspace incomplete; installing distro rdma tools..."
     retry 3 10 sudo apt-get install -y rdma-core ibverbs-utils infiniband-diags || true
     if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
+        echo "rdma userspace fixed by distro packages; skipping OFED install."
         return 0
     fi
 
@@ -70,12 +89,25 @@ DEFT_ROOT=/deft_code/deft
 
 echo "[1/6] installing packages on mn0..."
 export DEBIAN_FRONTEND=noninteractive
-retry 5 10 sudo apt-get update -q
-retry 5 10 sudo apt-get install -y \
-    nfs-kernel-server cmake gcc g++ \
-    libgflags-dev libnuma-dev numactl memcached libmemcached-dev \
-    libboost-all-dev autoconf automake libtool build-essential \
+REQ_PKGS=(
+    nfs-kernel-server cmake gcc g++
+    libgflags-dev libnuma-dev numactl memcached libmemcached-dev
+    libboost-all-dev autoconf automake libtool build-essential
     python3-paramiko python3-yaml rsync
+)
+MISSING_PKGS=()
+for p in "${REQ_PKGS[@]}"; do
+    if ! dpkg -s "$p" >/dev/null 2>&1; then
+        MISSING_PKGS+=("$p")
+    fi
+done
+if [[ "${#MISSING_PKGS[@]}" -gt 0 ]]; then
+    echo "installing missing packages: ${MISSING_PKGS[*]}"
+    retry 5 10 sudo apt-get update -q
+    retry 5 10 sudo apt-get install -y "${MISSING_PKGS[@]}"
+else
+    echo "all base packages already installed; skipping apt install."
+fi
 
 echo "[2/6] checking rdma..."
 if ! ensure_rdma_userspace; then
