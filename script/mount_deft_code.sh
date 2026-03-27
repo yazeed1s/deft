@@ -21,6 +21,26 @@ retry() {
     return 1
 }
 
+get_ssh_target() {
+    local short_node="$1"
+    local fqdn
+    fqdn=$(awk -v n="$short_node" '
+        $0 ~ ("(^|[[:space:]])" n "([[:space:]]|$)") {
+            for (i = 2; i <= NF; i++) {
+                if ($i ~ /\.cloudlab\.us$/) {
+                    print $i
+                    exit
+                }
+            }
+        }
+    ' /etc/hosts)
+    if [[ -n "${fqdn}" ]]; then
+        echo "${fqdn}"
+    else
+        echo "${short_node}"
+    fi
+}
+
 if [[ "$(hostname)" != "${SERVER_NODE}" && "$(hostname)" != "${SERVER_NODE}."* ]]; then
     echo "error: run this script on ${SERVER_NODE}"
     exit 1
@@ -61,8 +81,9 @@ fi
 
 echo "[3/4] mounting ${NFS_PATH} on client nodes..."
 for node in "${CLIENT_NODES[@]}"; do
-    echo "  -> ${node}"
-    retry 3 5 ssh ${SSH_OPTS} "${node}" "bash -s" -- "${SERVER_NODE}" "${NFS_PATH}" <<'EOF'
+    target=$(get_ssh_target "${node}")
+    echo "  -> ${node} (${target})"
+    retry 6 5 ssh ${SSH_OPTS} "${target}" "bash -s" -- "${SERVER_NODE}" "${NFS_PATH}" <<'EOF'
 set -euo pipefail
 SERVER_NODE="$1"
 NFS_PATH="$2"
@@ -94,7 +115,8 @@ echo "[4/4] validation..."
 echo "server exports:"
 showmount -e localhost
 for node in "${CLIENT_NODES[@]}"; do
-    ssh ${SSH_OPTS} "${node}" "findmnt -n -o SOURCE,TARGET --target '${NFS_PATH}' || true"
+    target=$(get_ssh_target "${node}")
+    ssh ${SSH_OPTS} "${target}" "findmnt -n -o SOURCE,TARGET --target '${NFS_PATH}' || true"
 done
 
 echo "done: ${NFS_PATH} is exported from ${SERVER_NODE} and mounted on all discovered nodes."
