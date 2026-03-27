@@ -20,6 +20,36 @@ retry() {
     return 1
 }
 
+get_lan_ip_for_node() {
+    local node="$1"
+    local ip
+    ip="$(awk -F'[:,]' -v n="$node" '$1==n && $2=="0"{print $3; exit}' /var/emulab/boot/hostmap 2>/dev/null || true)"
+    if [[ -z "${ip}" ]]; then
+        ip="$(awk -v n="$node" '$1 ~ /^10\.10\.1\./ && $0 ~ ("(^|[[:space:]])" n "([[:space:]]|$)") {print $1; exit}' /etc/hosts 2>/dev/null || true)"
+    fi
+    [[ -n "${ip}" ]] && printf '%s\n' "${ip}"
+}
+
+can_reach_ssh_port() {
+    local host="$1"
+    timeout 3 bash -c "cat < /dev/null > /dev/tcp/${host}/22" >/dev/null 2>&1
+}
+
+pick_reachable_ssh_target() {
+    local node="$1"
+    local lan_ip=""
+    if can_reach_ssh_port "${node}"; then
+        printf '%s\n' "${node}"
+        return 0
+    fi
+    lan_ip="$(get_lan_ip_for_node "${node}" || true)"
+    if [[ -n "${lan_ip}" ]] && can_reach_ssh_port "${lan_ip}"; then
+        printf '%s\n' "${lan_ip}"
+        return 0
+    fi
+    return 1
+}
+
 version_ge() {
     # Returns success when $1 >= $2
     [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | tail -n1)" == "$1" ]]
@@ -293,14 +323,19 @@ for node in "${CLUSTER_NODES[@]}"; do
     if [[ "$node" == "mn0" ]]; then
         continue
     fi
-    if ! sudo -u "$REAL_USER" ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 "$node" "hostname >/dev/null"; then
-        SSH_FAIL+=("$node")
+    target="${node}"
+    if ! target="$(pick_reachable_ssh_target "${node}")"; then
+        SSH_FAIL+=("${node}(unreachable)")
+        continue
+    fi
+    if ! sudo -u "$REAL_USER" ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 "${REAL_USER}@${target}" "hostname >/dev/null"; then
+        SSH_FAIL+=("${node}->${target}")
     fi
 done
 
 if [[ "${#SSH_FAIL[@]}" -gt 0 ]]; then
     echo "error: passwordless ssh from mn0 failed for: ${SSH_FAIL[*]}"
-    echo "hint: make sure all nodes share authorized_keys, then rerun this script."
+    echo "hint: run script/link_cluster.sh from your local machine to sync mn key to cn nodes."
     exit 1
 fi
 

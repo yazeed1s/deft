@@ -50,7 +50,11 @@ def main():
             config['clients'].append({'ip': ip, 'numa_id': numa_id})
 
     with open('/deft_code/deft/script/global_config.yaml', 'w') as f:
-        yaml.dump(config, f, sort_keys=False)
+        # PyYAML on Ubuntu 18.04 does not support sort_keys.
+        try:
+            yaml.dump(config, f, sort_keys=False)
+        except TypeError:
+            yaml.dump(config, f)
 
     # Generate memcached.conf for restartMemc.sh
     mn0_ip = socket.gethostbyname("mn0") if resolve_ip("mn0") else mn_ips[0]
