@@ -6,6 +6,7 @@ NFS_PATH="${1:-/deft_code}"
 SERVER_NODE="${2:-mn0}"
 SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8"
 SSH_USER="${SUDO_USER:-$USER}"
+SERVER_MOUNT_TARGET="${SERVER_NODE}"
 
 retry() {
     local attempts="$1"
@@ -70,6 +71,20 @@ pick_reachable_target() {
     return 1
 }
 
+get_lan_ip_for_node() {
+    local node="$1"
+    local mn_count="$2"
+    if [[ "${node}" =~ ^mn([0-9]+)$ ]]; then
+        echo "10.10.1.$((BASH_REMATCH[1] + 1))"
+        return 0
+    fi
+    if [[ "${node}" =~ ^cn([0-9]+)$ ]]; then
+        echo "10.10.1.$((mn_count + BASH_REMATCH[1] + 1))"
+        return 0
+    fi
+    return 1
+}
+
 if [[ "$(hostname)" != "${SERVER_NODE}" && "$(hostname)" != "${SERVER_NODE}."* ]]; then
     echo "error: run this script on ${SERVER_NODE}"
     exit 1
@@ -96,12 +111,23 @@ fi
 
 echo "[2/4] discovering cluster nodes..."
 mapfile -t ALL_NODES < <(grep -oE '\b(mn|cn)[0-9]+\b' /etc/hosts | sort -u)
+MN_COUNT=0
+for node in "${ALL_NODES[@]}"; do
+    if [[ "${node}" =~ ^mn[0-9]+$ ]]; then
+        MN_COUNT=$((MN_COUNT + 1))
+    fi
+done
 CLIENT_NODES=()
 for node in "${ALL_NODES[@]}"; do
     if [[ "${node}" != "${SERVER_NODE}" ]]; then
         CLIENT_NODES+=("${node}")
     fi
 done
+
+# Prefer experiment-LAN IP for NFS mount target when available.
+if lan_ip="$(get_lan_ip_for_node "${SERVER_NODE}" "${MN_COUNT}")"; then
+    SERVER_MOUNT_TARGET="${lan_ip}"
+fi
 
 if [[ "${#CLIENT_NODES[@]}" -eq 0 ]]; then
     echo "warning: no client nodes found in /etc/hosts"
@@ -110,15 +136,24 @@ fi
 
 echo "[3/4] mounting ${NFS_PATH} on client nodes..."
 for node in "${CLIENT_NODES[@]}"; do
-    if ! target="$(pick_reachable_target "${node}")"; then
-        echo "error: cannot reach ssh port on ${node} (or mapped FQDN)."
+    target=""
+    if target="$(pick_reachable_target "${node}")"; then
+        :
+    else
+        # Fall back to deterministic experiment-LAN IPs from profile numbering.
+        if lan_ip="$(get_lan_ip_for_node "${node}" "${MN_COUNT}")" && can_reach_ssh_port "${lan_ip}"; then
+            target="${lan_ip}"
+        fi
+    fi
+    if [[ -z "${target}" ]]; then
+        echo "error: cannot reach ssh port on ${node} (short/FQDN/lan-ip all failed)."
         echo "hint: check /etc/hosts and /var/emulab/boot/hostmap on mn0, and verify mn->cn ssh."
         exit 1
     fi
     echo "  -> ${node} (${SSH_USER}@${target})"
-    retry 6 5 ssh ${SSH_OPTS} "${SSH_USER}@${target}" "bash -s" -- "${SERVER_NODE}" "${NFS_PATH}" <<'EOF'
+    retry 6 5 ssh ${SSH_OPTS} "${SSH_USER}@${target}" "bash -s" -- "${SERVER_MOUNT_TARGET}" "${NFS_PATH}" <<'EOF'
 set -euo pipefail
-SERVER_NODE="$1"
+SERVER_TARGET="$1"
 NFS_PATH="$2"
 export DEBIAN_FRONTEND=noninteractive
 
@@ -129,17 +164,17 @@ sudo mkdir -p "${NFS_PATH}"
 
 if mountpoint -q "${NFS_PATH}"; then
     SRC=$(findmnt -n -o SOURCE --target "${NFS_PATH}" || true)
-    if [[ "${SRC}" != "${SERVER_NODE}:${NFS_PATH}" ]]; then
+    if [[ "${SRC}" != "${SERVER_TARGET}:${NFS_PATH}" ]]; then
         sudo umount "${NFS_PATH}" || true
     fi
 fi
 
 if ! mountpoint -q "${NFS_PATH}"; then
-    sudo mount -t nfs "${SERVER_NODE}:${NFS_PATH}" "${NFS_PATH}"
+    sudo mount -t nfs "${SERVER_TARGET}:${NFS_PATH}" "${NFS_PATH}"
 fi
 
 if ! grep -qE "^[^#].*[[:space:]]${NFS_PATH}[[:space:]]nfs([[:space:]]|$)" /etc/fstab; then
-    echo "${SERVER_NODE}:${NFS_PATH} ${NFS_PATH} nfs defaults,_netdev 0 0" | sudo tee -a /etc/fstab >/dev/null
+    echo "${SERVER_TARGET}:${NFS_PATH} ${NFS_PATH} nfs defaults,_netdev 0 0" | sudo tee -a /etc/fstab >/dev/null
 fi
 EOF
 done
