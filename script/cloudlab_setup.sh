@@ -82,6 +82,21 @@ if [[ "$(hostname)" != "mn0" && "$(hostname)" != mn0.* ]]; then
     exit 1
 fi
 
+if [[ -r /etc/os-release ]]; then
+    . /etc/os-release
+    if [[ "${ID:-}" == "ubuntu" ]]; then
+        case "${VERSION_ID:-}" in
+            22.*|24.*) ;;
+            *)
+                echo "error: unsupported Ubuntu ${VERSION_ID:-unknown} on this node."
+                echo "this repo now targets Ubuntu 22.04+ (CloudLab image UBUNTU22-64-STD)."
+                echo "re-instantiate your experiment with the updated profile.py image."
+                exit 1
+                ;;
+        esac
+    fi
+fi
+
 REAL_USER=${SUDO_USER:-$USER}
 REAL_GROUP=$(id -gn "$REAL_USER")
 REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
