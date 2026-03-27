@@ -20,6 +20,11 @@ retry() {
     return 1
 }
 
+version_ge() {
+    # Returns success when $1 >= $2
+    [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | tail -n1)" == "$1" ]]
+}
+
 has_exp_verbs_api() {
     [[ -f /usr/include/infiniband/verbs_exp.h ]] && grep -q "ibv_exp_dct" /usr/include/infiniband/verbs_exp.h
 }
@@ -77,6 +82,59 @@ ensure_rdma_userspace() {
     command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api
 }
 
+ensure_modern_cmake() {
+    local min_ver="3.12.0"
+    local install_ver="3.28.6"
+    local arch
+    local cmake_ver
+    local tgz
+    local url
+    local install_dir
+
+    if command -v cmake >/dev/null 2>&1; then
+        cmake_ver="$(cmake --version | awk 'NR==1{print $3}')"
+        if version_ge "$cmake_ver" "$min_ver"; then
+            echo "cmake ${cmake_ver} is sufficient."
+            return 0
+        fi
+        echo "cmake ${cmake_ver} is too old for C++20; upgrading..."
+    else
+        echo "cmake not found; installing..."
+    fi
+
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64|amd64) arch="x86_64" ;;
+        aarch64|arm64) arch="aarch64" ;;
+        *)
+            echo "error: unsupported architecture for cmake bootstrap: $arch"
+            return 1
+            ;;
+    esac
+
+    install_dir="/opt/cmake-${install_ver}-linux-${arch}"
+    tgz="cmake-${install_ver}-linux-${arch}.tar.gz"
+    url="https://github.com/Kitware/CMake/releases/download/v${install_ver}/${tgz}"
+
+    if [[ ! -d "$install_dir" ]]; then
+        cd /tmp
+        retry 3 10 wget -q -L -O "$tgz" "$url"
+        sudo mkdir -p /opt
+        sudo tar -xzf "$tgz" -C /opt
+    fi
+
+    sudo ln -sfn "${install_dir}/bin/cmake" /usr/local/bin/cmake
+    sudo ln -sfn "${install_dir}/bin/ctest" /usr/local/bin/ctest
+    sudo ln -sfn "${install_dir}/bin/cpack" /usr/local/bin/cpack
+    hash -r || true
+
+    cmake_ver="$(cmake --version | awk 'NR==1{print $3}')"
+    if ! version_ge "$cmake_ver" "$min_ver"; then
+        echo "error: cmake upgrade failed (found ${cmake_ver}, need >= ${min_ver})."
+        return 1
+    fi
+}
+
 if [[ "$(hostname)" != "mn0" && "$(hostname)" != mn0.* ]]; then
     echo "error: please run on mn0"
     exit 1
@@ -84,17 +142,7 @@ fi
 
 if [[ -r /etc/os-release ]]; then
     . /etc/os-release
-    if [[ "${ID:-}" == "ubuntu" ]]; then
-        case "${VERSION_ID:-}" in
-            22.*|24.*) ;;
-            *)
-                echo "error: unsupported Ubuntu ${VERSION_ID:-unknown} on this node."
-                echo "this repo now targets Ubuntu 22.04+ (CloudLab image UBUNTU22-64-STD)."
-                echo "re-instantiate your experiment with the updated profile.py image."
-                exit 1
-                ;;
-        esac
-    fi
+    echo "detected OS: ${PRETTY_NAME:-unknown}"
 fi
 
 REAL_USER=${SUDO_USER:-$USER}
@@ -108,7 +156,7 @@ REQ_PKGS=(
     nfs-kernel-server cmake gcc g++
     libgflags-dev libnuma-dev numactl memcached libmemcached-dev
     libboost-all-dev autoconf automake libtool build-essential
-    python3-paramiko python3-yaml rsync
+    python3-paramiko python3-yaml rsync wget
 )
 MISSING_PKGS=()
 for p in "${REQ_PKGS[@]}"; do
@@ -122,6 +170,18 @@ if [[ "${#MISSING_PKGS[@]}" -gt 0 ]]; then
     retry 5 10 sudo apt-get install -y "${MISSING_PKGS[@]}"
 else
     echo "all base packages already installed; skipping apt install."
+fi
+
+if ! command -v g++-10 >/dev/null 2>&1; then
+    if apt-cache show g++-10 >/dev/null 2>&1 && apt-cache show gcc-10 >/dev/null 2>&1; then
+        echo "installing gcc-10/g++-10 for reliable C++20 builds..."
+        retry 5 10 sudo apt-get install -y gcc-10 g++-10
+    fi
+fi
+
+if ! ensure_modern_cmake; then
+    echo "error: unable to install a modern cmake version."
+    exit 1
 fi
 
 echo "[2/6] checking rdma..."
