@@ -34,7 +34,7 @@ echo "[1/6] installing packages on mn0..."
 export DEBIAN_FRONTEND=noninteractive
 retry 5 10 sudo apt-get update -q
 retry 5 10 sudo apt-get install -y \
-    nfs-kernel-server cmake gcc-10 g++-10 \
+    nfs-kernel-server cmake gcc g++ \
     libgflags-dev libnuma-dev numactl memcached libmemcached-dev \
     libboost-all-dev autoconf automake libtool build-essential \
     python3-paramiko python3-yaml rsync
@@ -89,8 +89,13 @@ if ! ldconfig -p | grep -q libcityhash; then
 fi
 
 echo "[5/6] building deft..."
-export CC=gcc-10
-export CXX=g++-10
+if command -v gcc-10 >/dev/null 2>&1 && command -v g++-10 >/dev/null 2>&1; then
+    export CC=gcc-10
+    export CXX=g++-10
+else
+    export CC=gcc
+    export CXX=g++
+fi
 mkdir -p "$DEFT_ROOT/build"
 cd "$DEFT_ROOT/build"
 cmake -DCMAKE_BUILD_TYPE=Release ..

@@ -20,11 +20,30 @@ OS_IMAGE = params.os_image
 lan = request.LAN("rdma_lan")
 lan.bandwidth = 100000
 lan.best_effort = True
+# Clemson single-NIC nodes often need multiplexed/tagged experiment links.
+lan.link_multiplexing = True
+lan.vlan_tagging = True
 
 # Common dependencies and builds required for Deft
 common_setup = """
 #!/bin/bash
 set -e
+
+# Ensure experiment-LAN IP exists (some single-NIC Clemson nodes miss it at boot).
+SHORT_HOST=$(hostname -s)
+TARGET_IP=$(awk -v h="$SHORT_HOST" '
+    $1 ~ /^10\\.10\\.1\\./ && $0 ~ ("(^|[[:space:]])" h "([[:space:]]|$)") { print $1; exit }
+' /etc/hosts)
+if [ -n "$TARGET_IP" ] && ! ip -4 -o addr show | grep -q "10\\.10\\.1\\."; then
+    IFACE=$(ip route | awk '/default/ {print $5; exit}')
+    if [ -z "$IFACE" ]; then
+        IFACE=$(ip -o link show | awk -F': ' '$2 != "lo" {print $2; exit}')
+    fi
+    if [ -n "$IFACE" ]; then
+        sudo ip link set dev "$IFACE" up || true
+        sudo ip addr add "${TARGET_IP}/24" dev "$IFACE" 2>/dev/null || true
+    fi
+fi
 
 
 sudo apt-get update
