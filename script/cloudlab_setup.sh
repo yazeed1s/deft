@@ -319,9 +319,9 @@ sudo mkdir -p "$DEFT_ROOT"
 sudo chown "$REAL_USER:$REAL_GROUP" /deft_code "$DEFT_ROOT"
 
 if [[ -d /local/repository/.git ]]; then
-    sudo rsync -a --update --exclude build /local/repository/ "$DEFT_ROOT"/
+    sudo rsync -a --delete --exclude build /local/repository/ "$DEFT_ROOT"/
 elif [[ -f CMakeLists.txt ]]; then
-    sudo rsync -a --update --exclude build ./ "$DEFT_ROOT"/
+    sudo rsync -a --delete --exclude build ./ "$DEFT_ROOT"/
 else
     echo "error: cannot find repo source. expected /local/repository or current repo root."
     exit 1
