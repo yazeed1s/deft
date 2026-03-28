@@ -20,7 +20,6 @@ OS_IMAGE = params.os_image
 lan = request.LAN("rdma_lan")
 lan.bandwidth = 100000
 lan.best_effort = True
-# Clemson single-NIC nodes often need multiplexed/tagged experiment links.
 lan.link_multiplexing = True
 lan.vlan_tagging = True
 

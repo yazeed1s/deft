@@ -104,18 +104,42 @@ ensure_rdma_userspace() {
     fi
 
     echo "installing MLNX OFED userspace (${ofed_ver})..."
+    echo "  ofed package: ${ofed_tgz}"
+    echo "  primary url : ${ofed_url_primary}"
+    echo "  fallback url: ${ofed_url_fallback}"
     cd /tmp
     if [[ ! -f "${ofed_tgz}" ]]; then
+        echo "downloading OFED tarball..."
         retry 3 10 wget -q -L -O "${ofed_tgz}" "${ofed_url_primary}" \
             || retry 3 10 wget -q -L -O "${ofed_tgz}" "${ofed_url_fallback}" \
             || return 1
+    else
+        echo "reusing cached tarball: /tmp/${ofed_tgz}"
     fi
+    echo "extracting ${ofed_tgz}..."
     rm -rf "${ofed_dir}"
     tar xzf "${ofed_tgz}"
     cd "${ofed_dir}"
-    sudo ./mlnxofedinstall --user-space-only --force --without-fw-update --skip-repo || return 1
-    sudo /etc/init.d/openibd restart || true
+    echo "running mlnxofedinstall (this can take several minutes)..."
+    sudo ./mlnxofedinstall --user-space-only --force --without-fw-update --skip-repo
+    rc=$?
+    if [[ ${rc} -ne 0 ]]; then
+        echo "mlnxofedinstall failed with exit code ${rc}"
+        return 1
+    fi
+    echo "mlnxofedinstall completed successfully."
+
+    if [[ -x /etc/init.d/openibd ]]; then
+        echo "restarting openibd..."
+        sudo /etc/init.d/openibd restart || true
+    else
+        echo "openibd init script not found; skipping restart."
+    fi
+
+    echo "running ldconfig..."
     sudo ldconfig
+    echo "post-install check:"
+    command -v ibv_devinfo >/dev/null 2>&1 && ibv_devinfo -l || true
 
     command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api
 }
