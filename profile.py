@@ -6,9 +6,9 @@ pc = portal.Context()
 # Parameters
 pc.defineParameter("mn_count", "Memory Nodes", portal.ParameterType.INTEGER, 1)
 pc.defineParameter("cn_count", "Compute Nodes", portal.ParameterType.INTEGER, 5)
-pc.defineParameter("node_type", "Hardware Type", portal.ParameterType.STRING, "r650")
+pc.defineParameter("node_type", "Hardware Type", portal.ParameterType.STRING, "6151")
 pc.defineParameter("os_image", "Disk Image URN", portal.ParameterType.STRING,
-                   "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD")
+                   "urn:publicid:IDN+utah.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD")
 
 params = pc.bindParameters()
 request = pc.makeRequestRSpec()
