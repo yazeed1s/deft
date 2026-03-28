@@ -110,7 +110,7 @@ elif ! has_ofed_49; then
     rm -rf "$OFED_DIR"
     tar xzf "$OFED_TGZ"
     cd "$OFED_DIR"
-    sudo ./mlnxofedinstall --user-space-only --force --without-fw-update --skip-repo
+    sudo ./mlnxofedinstall --basic --force --without-fw-update --skip-repo
     sudo /etc/init.d/openibd restart || true
     sudo ldconfig
 fi

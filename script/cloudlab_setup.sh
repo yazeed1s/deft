@@ -86,14 +86,13 @@ ensure_rdma_userspace() {
     # If OFED 4.9 is already installed, do not reinstall it in setup.
     # Try a lightweight refresh, then fail with guidance if still incomplete.
     if has_ofed_49; then
-        echo "MLNX_OFED 4.9 already installed; skipping reinstall."
+        echo "MLNX_OFED 4.9 detected; restarting openibd and checking..."
         sudo /etc/init.d/openibd restart || true
         sudo ldconfig || true
         if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
             return 0
         fi
-        echo "existing OFED install is present but rdma tools/headers are incomplete."
-        return 1
+        echo "existing OFED install is incomplete (likely user-space-only); will reinstall with --basic."
     fi
 
     echo "rdma userspace incomplete; installing distro rdma tools..."
@@ -121,7 +120,7 @@ ensure_rdma_userspace() {
     tar xzf "${ofed_tgz}"
     cd "${ofed_dir}"
     echo "running mlnxofedinstall (this can take several minutes)..."
-    sudo ./mlnxofedinstall --user-space-only --force --without-fw-update --skip-repo
+    sudo ./mlnxofedinstall --basic --force --without-fw-update --skip-repo
     rc=$?
     if [[ ${rc} -ne 0 ]]; then
         echo "mlnxofedinstall failed with exit code ${rc}"
@@ -129,18 +128,9 @@ ensure_rdma_userspace() {
     fi
     echo "mlnxofedinstall completed successfully."
 
-    # On CloudLab single-NIC nodes, restarting openibd can drop the control link
-    # and make the node appear frozen. Default: skip restart and continue.
-    if [[ "${DEFT_RESTART_OPENIBD:-0}" == "1" ]]; then
-        if [[ -x /etc/init.d/openibd ]]; then
-            echo "restarting openibd (DEFT_RESTART_OPENIBD=1)..."
-            sudo /etc/init.d/openibd restart || true
-        else
-            echo "openibd init script not found; skipping restart."
-        fi
-    else
-        echo "skipping openibd restart by default (safe mode)."
-        echo "if needed, run manually later: sudo /etc/init.d/openibd restart"
+    if [[ -x /etc/init.d/openibd ]]; then
+        echo "restarting openibd..."
+        sudo /etc/init.d/openibd restart || true
     fi
 
     echo "running ldconfig..."
@@ -441,7 +431,7 @@ if ! command -v ofed_info >/dev/null 2>&1 || ! ofed_info -s 2>/dev/null | grep -
     rm -rf "${OFED_DIR}"
     tar xzf "${OFED_TGZ}"
     cd "${OFED_DIR}"
-    sudo ./mlnxofedinstall --user-space-only --force --without-fw-update --skip-repo
+    sudo ./mlnxofedinstall --basic --force --without-fw-update --skip-repo
 fi
 
 sudo ldconfig || true
