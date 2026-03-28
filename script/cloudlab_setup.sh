@@ -129,11 +129,18 @@ ensure_rdma_userspace() {
     fi
     echo "mlnxofedinstall completed successfully."
 
-    if [[ -x /etc/init.d/openibd ]]; then
-        echo "restarting openibd..."
-        sudo /etc/init.d/openibd restart || true
+    # On CloudLab single-NIC nodes, restarting openibd can drop the control link
+    # and make the node appear frozen. Default: skip restart and continue.
+    if [[ "${DEFT_RESTART_OPENIBD:-0}" == "1" ]]; then
+        if [[ -x /etc/init.d/openibd ]]; then
+            echo "restarting openibd (DEFT_RESTART_OPENIBD=1)..."
+            sudo /etc/init.d/openibd restart || true
+        else
+            echo "openibd init script not found; skipping restart."
+        fi
     else
-        echo "openibd init script not found; skipping restart."
+        echo "skipping openibd restart by default (safe mode)."
+        echo "if needed, run manually later: sudo /etc/init.d/openibd restart"
     fi
 
     echo "running ldconfig..."
@@ -419,6 +426,20 @@ if [[ -n "$MISSING" ]]; then
     sudo apt-get install -y $MISSING
 fi
 sudo ldconfig || true
+
+# client/server binaries are dynamically linked against libcityhash from /usr/local/lib.
+if ! ldconfig -p | grep -q 'libcityhash\.so'; then
+    cd /tmp
+    if [[ ! -d cityhash ]]; then
+        git clone https://github.com/google/cityhash.git
+    fi
+    cd cityhash
+    autoreconf -if
+    ./configure
+    make -j"$(nproc)"
+    sudo make install
+    sudo ldconfig
+fi
 
 for bin in /deft_code/deft/build/client /deft_code/deft/build/server; do
     if [[ -x "$bin" ]]; then
