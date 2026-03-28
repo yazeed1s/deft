@@ -6,7 +6,7 @@ pc = portal.Context()
 # Parameters
 pc.defineParameter("mn_count", "Memory Nodes", portal.ParameterType.INTEGER, 1)
 pc.defineParameter("cn_count", "Compute Nodes", portal.ParameterType.INTEGER, 5)
-pc.defineParameter("node_type", "Hardware Type", portal.ParameterType.STRING, "6151")
+pc.defineParameter("node_type", "Hardware Type", portal.ParameterType.STRING, "d6515")
 pc.defineParameter("os_image", "Disk Image URN", portal.ParameterType.STRING,
                    "urn:publicid:IDN+utah.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD")
 
