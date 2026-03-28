@@ -65,9 +65,17 @@ has_ofed_49() {
 
 ensure_rdma_userspace() {
     local ofed_ver="4.9-5.1.0.0"
-    local ofed_dir="MLNX_OFED_LINUX-${ofed_ver}-ubuntu18.04-x86_64"
+    local ofed_os="ubuntu20.04"
+    if [[ -r /etc/os-release ]]; then
+        local ver_id
+        ver_id="$(awk -F= '/^VERSION_ID=/{gsub(/"/,"",$2); print $2}' /etc/os-release)"
+        if [[ "${ver_id}" == "18.04" ]]; then
+            ofed_os="ubuntu18.04"
+        fi
+    fi
+    local ofed_dir="MLNX_OFED_LINUX-${ofed_ver}-${ofed_os}-x86_64"
     local ofed_tgz="${ofed_dir}.tgz"
-    local ofed_url_primary="https://linux.mellanox.com/public/repo/mlnx_ofed/${ofed_ver}/ubuntu18.04-x86_64/${ofed_tgz}"
+    local ofed_url_primary="https://linux.mellanox.com/public/repo/mlnx_ofed/${ofed_ver}/${ofed_os}-x86_64/${ofed_tgz}"
     local ofed_url_fallback="http://content.mellanox.com/ofed/MLNX_OFED-${ofed_ver}/${ofed_tgz}"
 
     if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
@@ -194,6 +202,25 @@ ensure_modern_gcc() {
     command -v gcc-10 >/dev/null 2>&1 && command -v g++-10 >/dev/null 2>&1
 }
 
+ensure_python_cmd() {
+    local py_major=""
+    if command -v python >/dev/null 2>&1; then
+        py_major="$(python -c 'import sys; print(sys.version_info[0])' 2>/dev/null || true)"
+        if [[ "${py_major}" == "3" ]]; then
+            echo "python command already points to Python 3."
+            return 0
+        fi
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        echo "setting /usr/local/bin/python -> $(command -v python3)"
+        sudo ln -sfn "$(command -v python3)" /usr/local/bin/python
+        return 0
+    fi
+
+    return 1
+}
+
 if [[ "$(hostname)" != "mn0" && "$(hostname)" != mn0.* ]]; then
     echo "error: please run on mn0"
     exit 1
@@ -237,6 +264,10 @@ if ! ensure_modern_cmake; then
 fi
 if ! ensure_modern_gcc; then
     echo "error: unable to install gcc-10/g++-10 required for C++20."
+    exit 1
+fi
+if ! ensure_python_cmd; then
+    echo "error: unable to ensure python command uses Python 3."
     exit 1
 fi
 
@@ -302,7 +333,7 @@ make -j"$(nproc)"
 test -x ./server
 test -x ./client
 
-echo "[6/6] preparing passwordless ssh from ${REAL_USER}..."
+echo "[6/7] preparing passwordless ssh from ${REAL_USER}..."
 sudo -u "$REAL_USER" mkdir -p "${REAL_HOME}/.ssh"
 sudo -u "$REAL_USER" chmod 700 "${REAL_HOME}/.ssh"
 
@@ -339,5 +370,51 @@ if [[ "${#SSH_FAIL[@]}" -gt 0 ]]; then
     exit 1
 fi
 
-echo "done. build + ssh checks passed."
+echo "[7/7] ensuring runtime libraries on client nodes..."
+RUNTIME_FAIL=()
+for node in "${CLUSTER_NODES[@]}"; do
+    if [[ "$node" == "mn0" ]]; then
+        continue
+    fi
+    target="${node}"
+    if ! target="$(pick_reachable_ssh_target "${node}")"; then
+        RUNTIME_FAIL+=("${node}(unreachable)")
+        continue
+    fi
+    echo "  -> ${node} (${target})"
+    if ! sudo -u "$REAL_USER" ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 "${REAL_USER}@${target}" "bash -s" <<'EOF'
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+REQ_PKGS="libmemcached11 libmemcached-dev libnuma1 numactl nfs-common libgflags2.2 libgflags-dev libboost-all-dev libgoogle-perftools-dev rdma-core ibverbs-utils"
+MISSING=""
+for p in $REQ_PKGS; do
+    dpkg -s "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
+done
+if [[ -n "$MISSING" ]]; then
+    sudo apt-get update -q
+    sudo apt-get install -y $MISSING
+fi
+sudo ldconfig || true
+
+for bin in /deft_code/deft/build/client /deft_code/deft/build/server; do
+    if [[ -x "$bin" ]]; then
+        if ldd "$bin" | grep -q "not found"; then
+            echo "missing shared libraries for $bin on $(hostname -s):"
+            ldd "$bin" | grep "not found"
+            exit 1
+        fi
+    fi
+done
+EOF
+    then
+        RUNTIME_FAIL+=("${node}->${target}")
+    fi
+done
+
+if [[ "${#RUNTIME_FAIL[@]}" -gt 0 ]]; then
+    echo "error: runtime dependency install failed for: ${RUNTIME_FAIL[*]}"
+    exit 1
+fi
+
+echo "done. build + ssh + runtime dependency checks passed."
 echo "next: cd /deft_code/deft/script && python3 gen_config.py && ./cloudlab_run.sh --smoke"
