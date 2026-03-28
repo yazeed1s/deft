@@ -95,23 +95,25 @@ fi
 if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
     :
 elif has_ofed_49; then
-    sudo /etc/init.d/openibd restart || true
     sudo ldconfig || true
 elif ! has_ofed_49; then
     OFED_OS=$(awk -F= '/^VERSION_ID=/{gsub(/"/,"",$2); if ($2 ~ /^20/) print "ubuntu20.04"; else print "ubuntu18.04"}' /etc/os-release)
-    OFED_DIR="MLNX_OFED_LINUX-4.9-5.1.0.0-${OFED_OS}-x86_64"
-    OFED_TGZ="${OFED_DIR}.tgz"
-    OFED_URL1="https://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}-x86_64/${OFED_TGZ}"
-    OFED_URL2="http://content.mellanox.com/ofed/MLNX_OFED-4.9-5.1.0.0/${OFED_TGZ}"
-    cd /tmp
-    if [ ! -f "$OFED_TGZ" ]; then
-        retry 3 10 wget -q -L -O "$OFED_TGZ" "$OFED_URL1" || retry 3 10 wget -q -L -O "$OFED_TGZ" "$OFED_URL2"
-    fi
-    rm -rf "$OFED_DIR"
-    tar xzf "$OFED_TGZ"
-    cd "$OFED_DIR"
-    sudo ./mlnxofedinstall --basic --force --without-fw-update --skip-repo
-    sudo /etc/init.d/openibd restart || true
+    REPO_BASE="http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}/x86_64"
+
+    sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<OFEDAPT
+deb [trusted=yes] ${REPO_BASE}/MLNX_LIBS ./
+deb [trusted=yes] ${REPO_BASE}/COMMON ./
+OFEDAPT
+
+    retry 3 10 sudo apt-get update -q
+    retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages \
+        libibverbs1 libibverbs-dev ibverbs-utils \
+        libmlx5-1 libmlx5-dev \
+        librdmacm1 librdmacm-dev \
+        libibumad libibmad infiniband-diags \
+        mlnx-ofed-kernel-dkms || true
+
+    # skip openibd restart to avoid dropping network interfaces; reboot instead
     sudo ldconfig
 fi
 """
