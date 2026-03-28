@@ -149,6 +149,8 @@ def main():
     exe_path = f'{g_cfg["src_path"]}/{g_cfg["app_rel_path"]}'
     username = g_cfg['username']
     password = g_cfg['password']
+    # Clemson/CloudLab experiment network is typically on mlx5_2 (10.10.1.x).
+    rnic_id = int(g_cfg.get('rnic_id', 2))
 
     with open(file_name, 'w') as fp:
         product_list = list(product(key_space_arr, read_ratio_arr, zipf_arr, threads_CN_arr))
@@ -180,7 +182,7 @@ def main():
                     'LD_LIBRARY_PATH=/usr/lib/libibverbs:/usr/lib/x86_64-linux-gnu/libibverbs:$LD_LIBRARY_PATH '
                     f'./{g_cfg["server_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
-                    f'--numa_id {numa_id} > ../log/server_{i}.log 2>&1'
+                    f'--numa_id {numa_id} --rnic_id {rnic_id} > ../log/server_{i}.log 2>&1'
                 )
 
                 ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
@@ -206,7 +208,7 @@ def main():
                     'LD_LIBRARY_PATH=/usr/lib/libibverbs:/usr/lib/x86_64-linux-gnu/libibverbs:$LD_LIBRARY_PATH '
                     f'./{g_cfg["client_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
-                    f'--numa_id {numa_id} --num_prefill_threads {num_prefill_threads} '
+                    f'--numa_id {numa_id} --rnic_id {rnic_id} --num_prefill_threads {num_prefill_threads} '
                     f'--num_bench_threads {num_threads} --key_space {key_space} '
                     f'--read_ratio {read_ratio} --zipf {zipf} '
                     f'> ../log/client_{i}.log 2>&1'

@@ -425,6 +425,25 @@ if [[ -n "$MISSING" ]]; then
     sudo apt-get update -q
     sudo apt-get install -y $MISSING
 fi
+
+# Keep CN OFED userspace aligned with MN build/runtime expectations.
+if ! command -v ofed_info >/dev/null 2>&1 || ! ofed_info -s 2>/dev/null | grep -q "MLNX_OFED_LINUX-4.9-5.1.0.0"; then
+    OFED_VER="4.9-5.1.0.0"
+    OFED_OS="ubuntu20.04"
+    OFED_DIR="MLNX_OFED_LINUX-${OFED_VER}-${OFED_OS}-x86_64"
+    OFED_TGZ="${OFED_DIR}.tgz"
+    OFED_URL1="https://linux.mellanox.com/public/repo/mlnx_ofed/${OFED_VER}/${OFED_OS}-x86_64/${OFED_TGZ}"
+    OFED_URL2="http://content.mellanox.com/ofed/MLNX_OFED-${OFED_VER}/${OFED_TGZ}"
+    cd /tmp
+    if [[ ! -f "${OFED_TGZ}" ]]; then
+        wget -q -L -O "${OFED_TGZ}" "${OFED_URL1}" || wget -q -L -O "${OFED_TGZ}" "${OFED_URL2}"
+    fi
+    rm -rf "${OFED_DIR}"
+    tar xzf "${OFED_TGZ}"
+    cd "${OFED_DIR}"
+    sudo ./mlnxofedinstall --user-space-only --force --without-fw-update --skip-repo
+fi
+
 sudo ldconfig || true
 
 # client/server binaries are dynamically linked against libcityhash from /usr/local/lib.

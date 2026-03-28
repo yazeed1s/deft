@@ -1,17 +1,16 @@
-#define STRIP_FLAG_HELP 1    // this must go before the #include!
-#include <gflags/gflags.h>
+#define STRIP_FLAG_HELP 1 // this must go before the #include!
 #include "Timer.h"
 #include "Tree.h"
 #include "zipf.h"
+#include <gflags/gflags.h>
 
 #include <city.h>
+#include <random>
 #include <stdlib.h>
 #include <thread>
 #include <time.h>
 #include <unistd.h>
 #include <vector>
-#include <random>
-
 
 //////////////////// workload parameters /////////////////////
 
@@ -27,6 +26,7 @@ const int kCoroCnt = 3;
 #endif
 
 DEFINE_int32(numa_id, 0, "numa node id");
+DEFINE_int32(rnic_id, 0, "rdma device index (ibv device id)");
 DEFINE_int32(server_count, 1, "server count");
 DEFINE_int32(client_count, 1, "client count");
 // DEFINE_int32(thread_count, 1, "thread count");
@@ -60,7 +60,7 @@ inline Key to_key(uint64_t k) {
 }
 
 class RequsetGenBench : public RequstGen {
- public:
+public:
   RequsetGenBench(int coro_id, DSMClient *dsm_client, int thread_id)
       : coro_id(coro_id), dsm_client_(dsm_client), thread_id_(thread_id) {
     //  seed = rdtsc();
@@ -98,7 +98,7 @@ class RequsetGenBench : public RequstGen {
     return r;
   }
 
- private:
+private:
   int coro_id;
   DSMClient *dsm_client_;
   int thread_id_;
@@ -146,7 +146,6 @@ void ycsb_d(int id) {
   total_time[id][0] = total_timer.end();
 }
 #endif
-
 
 std::atomic<int64_t> prefill_cnt{0};
 void thread_run(int id) {
@@ -217,7 +216,7 @@ void thread_run(int id) {
     uint64_t hit = 0;
     uint64_t all = 0;
     for (int i = 0; i < FLAGS_num_prefill_threads; ++i) {
-      prefill_tp += (double)total_time[i][1] * 1e3 / total_time[i][0];  // Mops
+      prefill_tp += (double)total_time[i][1] * 1e3 / total_time[i][0]; // Mops
       hit += cache_hit[i][0];
       all += (cache_hit[i][0] + cache_miss[i][0]);
     }
@@ -256,7 +255,7 @@ void thread_run(int id) {
   while (prefill_cnt.load() != 0)
     ;
 
-#endif  // ndef BENCH_LOCK
+#endif // ndef BENCH_LOCK
 
   // bench
   if (id >= FLAGS_num_bench_threads) {
@@ -316,7 +315,7 @@ void thread_run(int id) {
     tree->lock_bench(key);
 #else
     Value v;
-    if (rand_r(&seed) % 100 < FLAGS_read_ratio) {  // GET
+    if (rand_r(&seed) % 100 < FLAGS_read_ratio) { // GET
 #ifdef YCSB_E
       Value buffer[101];
       tree->range_query(key, key + 100, buffer, 100);
@@ -349,7 +348,6 @@ void print_args() {
       FLAGS_num_bench_threads, FLAGS_read_ratio, FLAGS_zipf);
 }
 
-
 int main(int argc, char *argv[]) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   print_args();
@@ -359,7 +357,7 @@ int main(int argc, char *argv[]) {
 #endif
 
   DSMConfig config;
-  config.rnic_id = FLAGS_numa_id;
+  config.rnic_id = FLAGS_rnic_id;
   config.num_server = FLAGS_server_count;
   config.num_client = FLAGS_client_count;
   dsm_client = DSMClient::GetInstance(config);
@@ -400,7 +398,7 @@ int main(int argc, char *argv[]) {
   uint64_t hit = 0;
   uint64_t all = 0;
   for (int i = 0; i < FLAGS_num_bench_threads; ++i) {
-    all_tp += (double)FLAGS_ops_per_thread * 1e3 / total_time[i][0];  // Mops
+    all_tp += (double)FLAGS_ops_per_thread * 1e3 / total_time[i][0]; // Mops
     hit += cache_hit[i][0];
     all += (cache_hit[i][0] + cache_miss[i][0]);
   }
@@ -437,10 +435,10 @@ int main(int argc, char *argv[]) {
            (double)stat_lat[lat_write_page] / stat_cnt[lat_write_page]);
     printf("avg crc latency: %.1lf\n",
            (double)stat_lat[lat_crc] / stat_cnt[lat_crc]);
-    printf(
-        "%d avg internal page search latency: %.1lf\n",
-        dsm_client->get_my_client_id(),
-        (double)stat_lat[lat_internal_search] / stat_cnt[lat_internal_search]);
+    printf("%d avg internal page search latency: %.1lf\n",
+           dsm_client->get_my_client_id(),
+           (double)stat_lat[lat_internal_search] /
+               stat_cnt[lat_internal_search]);
     // printf("%d avg cache search latency: %.1lf\n",
     //        dsm_client->get_my_client_id(),
     //        (double)stat_lat[lat_cache_search] / stat_cnt[lat_cache_search]);

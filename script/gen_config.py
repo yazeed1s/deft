@@ -2,6 +2,8 @@
 import os
 import socket
 import getpass
+import re
+import subprocess
 import yaml
 
 def resolve_ip(hostname):
@@ -9,6 +11,20 @@ def resolve_ip(hostname):
         return socket.gethostbyname(hostname)
     except:
         return None
+
+def detect_rnic_id():
+    # Prefer the RNIC carrying the experiment LAN (10.10.1.x) in show_gids output.
+    try:
+        out = subprocess.check_output(["show_gids"], stderr=subprocess.STDOUT, text=True)
+        for line in out.splitlines():
+            if "10.10.1." in line:
+                m = re.search(r"(mlx5_(\\d+))", line)
+                if m:
+                    return int(m.group(2))
+    except Exception:
+        pass
+    # CloudLab r650 commonly uses mlx5_2 for experiment VLAN.
+    return 2
 
 def main():
     username = getpass.getuser()
@@ -35,6 +51,7 @@ def main():
         'app_rel_path': 'build',
         'server_app': 'server',
         'client_app': 'client',
+        'rnic_id': detect_rnic_id(),
         'username': username,
         'password': '',
         'servers': [],
