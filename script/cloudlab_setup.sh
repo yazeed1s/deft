@@ -98,7 +98,7 @@ ensure_rdma_userspace() {
     local ofed_os="ubuntu20.04"
     if [[ -r /etc/os-release ]]; then
         local ver_id
-        ver_id="$(awk -F= '/^VERSION_ID=/{gsub(/\"/,\"\",$2); print $2}' /etc/os-release)"
+        ver_id="$(awk -F= '/^VERSION_ID=/{gsub(/"/,"",$2); print $2}' /etc/os-release)"
         if [[ "${ver_id}" == "18.04" ]]; then
             ofed_os="ubuntu18.04"
         fi
