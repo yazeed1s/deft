@@ -1,7 +1,9 @@
 #include "DirectoryConnection.h"
 
+#include "HugePageAlloc.h"
 #include "connection.h"
 #include <cstdlib>
+#include <cstring>
 
 DirectoryConnection::DirectoryConnection(uint16_t dirID, void *dsmPool,
                                          uint64_t dsmSize, uint32_t num_client,
@@ -34,6 +36,18 @@ DirectoryConnection::DirectoryConnection(uint16_t dirID, void *dsmPool,
     this->lockSize = define::kLockChipMemSize;
     this->lockMR = createMemoryRegionOnChip((uint64_t)this->lockPool,
                                             this->lockSize, &ctx);
+    if (!this->lockMR) {
+      Debug::notifyInfo(
+          "on-chip lock memory unavailable; falling back to host memory");
+      this->lockPool = hugePageAlloc(this->lockSize);
+      memset(this->lockPool, 0, this->lockSize);
+      this->lockMR =
+          createMemoryRegion((uint64_t)this->lockPool, this->lockSize, &ctx);
+      if (!this->lockMR) {
+        Debug::notifyError("failed to register fallback host lock memory");
+        std::abort();
+      }
+    }
     this->lockLKey = lockMR->lkey;
   }
 

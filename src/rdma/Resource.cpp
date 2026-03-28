@@ -235,8 +235,15 @@ bool createQueuePair(ibv_qp **qp, ibv_qp_type mode, ibv_cq *send_cq,
 
   *qp = ibv_exp_create_qp(context->ctx, &attr);
   if (!(*qp)) {
-    Debug::notifyError("Failed to create QP");
-    return false;
+    if (mode == IBV_QPT_RC) {
+      // Some stacks reject extended-atomics args; retry with a minimal RC QP.
+      attr.comp_mask = IBV_EXP_QP_INIT_ATTR_PD;
+      *qp = ibv_exp_create_qp(context->ctx, &attr);
+    }
+    if (!(*qp)) {
+      Debug::notifyError("Failed to create QP");
+      return false;
+    }
   }
 
   // Debug::notifyInfo("Create Queue Pair with Num = %d", (*qp)->qp_num);
