@@ -74,18 +74,19 @@ sudo apt-get install -y --no-install-recommends \
   dkms build-essential "linux-headers-\$(uname -r)" \
   ca-certificates wget
 
+sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list
 sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<EOF
 deb [trusted=yes] \${REPO_BASE}/MLNX_LIBS ./
-deb [trusted=yes] \${REPO_BASE}/COMMON ./
 EOF
 
-sudo apt-get update -q
+# Newer MLNX mirrors may not expose COMMON for this OFED version.
+sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
 sudo apt-get install -y --allow-downgrades --allow-change-held-packages \
   libibverbs1 libibverbs-dev ibverbs-utils \
   librdmacm1 librdmacm-dev \
   libmlx5-1 libmlx5-dev \
   libibumad3 libibumad-dev libibmad5 libibmad-dev infiniband-diags \
-  mlnx-ofed-kernel-dkms || true
+  mlnx-ofed-kernel-dkms --allow-unauthenticated || true
 
 sudo ldconfig
 REMOTE

@@ -72,15 +72,15 @@ install_ofed_via_apt() {
     echo "  repo: ${repo_base}/MLNX_LIBS"
 
     # Add MLNX_OFED apt sources
+    sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list
     sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<APTEOF
 deb [trusted=yes] ${repo_base}/MLNX_LIBS ./
-deb [trusted=yes] ${repo_base}/COMMON ./
 APTEOF
 
-    retry 3 10 sudo apt-get update -q
+    retry 3 10 sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
 
     # Install OFED packages; --allow-downgrades replaces inbox rdma-core versions.
-    retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages \
+    retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
         libibverbs1 libibverbs-dev ibverbs-utils \
         libmlx5-1 libmlx5-dev \
         librdmacm1 librdmacm-dev \
@@ -431,12 +431,12 @@ if ! [ -f /usr/include/infiniband/verbs_exp.h ] || ! grep -q "ibv_exp_dct" /usr/
     OFED_OS="ubuntu20.04"
     REPO_BASE="http://linux.mellanox.com/public/repo/mlnx_ofed/${OFED_VER}/${OFED_OS}/x86_64"
 
+    sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list
     sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<REOF
 deb [trusted=yes] ${REPO_BASE}/MLNX_LIBS ./
-deb [trusted=yes] ${REPO_BASE}/COMMON ./
 REOF
-    sudo apt-get update -q
-    sudo apt-get install -y --allow-downgrades --allow-change-held-packages \
+    sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
+    sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
         libibverbs1 libibverbs-dev ibverbs-utils \
         libmlx5-1 libmlx5-dev \
         librdmacm1 librdmacm-dev \
