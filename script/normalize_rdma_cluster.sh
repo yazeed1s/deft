@@ -92,14 +92,7 @@ sudo ldconfig
 REMOTE
 done
 
-echo "== [2/6] Reboot all nodes =="
-for n in "${NODES[@]}"; do
-  echo "rebooting ${n}"
-  run_remote "${n}" "sudo reboot" || true
-done
-
-echo "== [3/6] Wait for SSH on all nodes =="
-sleep 8
+echo "== [2/5] Verify SSH reachability on all nodes =="
 for n in "${NODES[@]}"; do
   printf 'waiting %-8s ' "${n}"
   ready=0
@@ -113,13 +106,13 @@ for n in "${NODES[@]}"; do
   done
   if [[ "${ready}" -ne 1 ]]; then
     echo
-    echo "error: ${n} did not come back after reboot"
+    echo "error: ${n} is unreachable over SSH"
     exit 1
   fi
   echo " ok"
 done
 
-echo "== [4/6] Collect per-node RDMA device for 10.10.1.x =="
+echo "== [3/5] Collect per-node RDMA device for 10.10.1.x =="
 declare -A NODE_DEV=()
 declare -A NODE_ID=()
 
@@ -145,7 +138,7 @@ for n in "${NODES[@]}"; do
   echo "selected: dev=${dev} rnic_id=${rid}"
 done
 
-echo "== [5/6] Ensure one common rnic_id across cluster =="
+echo "== [4/5] Ensure one common rnic_id across cluster =="
 COMMON_ID=""
 for n in "${NODES[@]}"; do
   echo "${n}: dev=${NODE_DEV[${n}]} id=${NODE_ID[${n}]}"
@@ -178,7 +171,7 @@ with open(cfg_path, "w") as f:
 print(f"updated {cfg_path} with rnic_id={rnic_id}")
 PY
 
-echo "== [6/6] RDMA pingpong sanity (mn0 <-> cn0 if present) =="
+echo "== [5/5] RDMA pingpong sanity (mn0 <-> cn0 if present) =="
 if [[ -n "${NODE_DEV[mn0]:-}" && -n "${NODE_DEV[cn0]:-}" ]]; then
   MN_DEV="${NODE_DEV[mn0]}"
   CN0_DEV="${NODE_DEV[cn0]}"
@@ -194,4 +187,5 @@ else
 fi
 
 echo "done"
+echo "note: if kernel modules were updated, reboot manually when you decide."
 echo "next: cd ${ROOT}/script && python3 run_bench.py --smoke"

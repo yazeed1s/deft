@@ -100,13 +100,13 @@ elif ! has_ofed_49; then
     OFED_OS=$(awk -F= '/^VERSION_ID=/{gsub(/"/,"",$2); if ($2 ~ /^20/) print "ubuntu20.04"; else print "ubuntu18.04"}' /etc/os-release)
     REPO_BASE="http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}/x86_64"
 
+    sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list
     sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<OFEDAPT
 deb [trusted=yes] ${REPO_BASE}/MLNX_LIBS ./
-deb [trusted=yes] ${REPO_BASE}/COMMON ./
 OFEDAPT
 
-    retry 3 10 sudo apt-get update -q
-    retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages \
+    retry 3 10 sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
+    retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
         libibverbs1 libibverbs-dev ibverbs-utils \
         libmlx5-1 libmlx5-dev \
         librdmacm1 librdmacm-dev \
