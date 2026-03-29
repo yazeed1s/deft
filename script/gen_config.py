@@ -18,9 +18,13 @@ def detect_rnic_id():
         out = subprocess.check_output(["show_gids"], stderr=subprocess.STDOUT, text=True)
         for line in out.splitlines():
             if "10.10.1." in line:
-                m = re.search(r"(mlx5_(\\d+))", line)
+                m = re.search(r"(mlx5_(\d+))", line)
                 if m:
                     return int(m.group(2))
+                # Newer stacks can expose names like rocep202s0f0/rocep202s0f1.
+                m = re.search(r"f(\d+)\b", line)
+                if m:
+                    return int(m.group(1))
     except Exception:
         pass
     # CloudLab r650 commonly uses mlx5_2 for experiment VLAN.

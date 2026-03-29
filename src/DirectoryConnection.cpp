@@ -56,7 +56,10 @@ DirectoryConnection::DirectoryConnection(uint16_t dirID, void *dsmPool,
     data2app[i] = new ibv_qp *[num_client];
     // client
     for (size_t k = 0; k < num_client; ++k) {
-      createQueuePair(&data2app[i][k], IBV_QPT_RC, cq, &ctx);
+      if (!createQueuePair(&data2app[i][k], IBV_QPT_RC, cq, &ctx)) {
+        Debug::notifyError("createQueuePair failed on server");
+        std::abort();
+      }
     }
   }
 }

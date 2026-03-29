@@ -35,7 +35,10 @@ ThreadConnection::ThreadConnection(uint16_t threadID, void *cachePool,
   for (int i = 0; i < NR_DIRECTORY; ++i) {
     data[i] = new ibv_qp *[machineNR];
     for (size_t k = 0; k < machineNR; ++k) {
-      createQueuePair(&data[i][k], IBV_QPT_RC, cq, &ctx);
+      if (!createQueuePair(&data[i][k], IBV_QPT_RC, cq, &ctx)) {
+        Debug::notifyError("createQueuePair failed on client");
+        std::abort();
+      }
     }
   }
 }
