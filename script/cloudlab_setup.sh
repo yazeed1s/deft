@@ -55,100 +55,9 @@ version_ge() {
     [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | tail -n1)" == "$1" ]]
 }
 
-has_exp_verbs_api() {
-    [[ -f /usr/include/infiniband/verbs_exp.h ]] && grep -q "ibv_exp_dct" /usr/include/infiniband/verbs_exp.h
-}
 
-has_ofed_49() {
-    command -v ofed_info >/dev/null 2>&1 && ofed_info -s 2>/dev/null | grep -q "MLNX_OFED_LINUX-4.9-5.1.0.0"
-}
 
-install_ofed_via_apt() {
-    local ofed_ver="$1"
-    local ofed_os="$2"
-    local repo_base="http://linux.mellanox.com/public/repo/mlnx_ofed/${ofed_ver}/${ofed_os}/x86_64"
 
-    echo "installing MLNX_OFED ${ofed_ver} via apt repository..."
-    echo "  repo: ${repo_base}/MLNX_LIBS"
-
-    # Add MLNX_OFED apt sources
-    sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list
-    sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<APTEOF
-deb [trusted=yes] ${repo_base}/MLNX_LIBS ./
-APTEOF
-
-    retry 3 10 sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
-
-    # Install OFED packages; --allow-downgrades replaces inbox rdma-core versions.
-    retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
-        libibverbs1 libibverbs-dev ibverbs-utils \
-        libmlx5-1 libmlx5-dev \
-        librdmacm1 librdmacm-dev \
-        libibumad libibmad infiniband-diags \
-        mlnx-ofed-kernel-dkms || true
-
-    # Skip openibd restart to avoid dropping network interfaces.
-    # New kernel modules will load on next reboot.
-    echo "skipping openibd restart (reboot nodes after install to load new modules)."
-    sudo ldconfig
-}
-
-ensure_rdma_userspace() {
-    local ofed_ver="4.9-5.1.0.0"
-    local ofed_os="ubuntu20.04"
-    if [[ -r /etc/os-release ]]; then
-        local ver_id
-        ver_id="$(awk -F= '/^VERSION_ID=/{gsub(/"/,"",$2); print $2}' /etc/os-release)"
-        if [[ "${ver_id}" == "18.04" ]]; then
-            ofed_os="ubuntu18.04"
-        fi
-    fi
-
-    if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
-        echo "rdma userspace already present; skipping install."
-        return 0
-    fi
-
-    if has_ofed_49; then
-        echo "MLNX_OFED 4.9 detected; checking headers..."
-        sudo ldconfig || true
-        if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
-            return 0
-        fi
-        echo "existing OFED install is incomplete; will reinstall."
-    fi
-
-    # Primary method: install from apt repository (tarball URLs are deprecated).
-    install_ofed_via_apt "${ofed_ver}" "${ofed_os}"
-    if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
-        echo "OFED installed successfully via apt."
-        return 0
-    fi
-
-    # Fallback: try tarball download (in case apt method missed something).
-    echo "apt install incomplete; trying tarball fallback..."
-    local ofed_dir="MLNX_OFED_LINUX-${ofed_ver}-${ofed_os}-x86_64"
-    local ofed_tgz="${ofed_dir}.tgz"
-    cd /tmp
-    if [[ ! -f "${ofed_tgz}" ]]; then
-        retry 3 10 wget -q -L -O "${ofed_tgz}" \
-            "https://linux.mellanox.com/public/repo/mlnx_ofed/${ofed_ver}/${ofed_os}-x86_64/${ofed_tgz}" \
-            || retry 3 10 wget -q -L -O "${ofed_tgz}" \
-            "http://content.mellanox.com/ofed/MLNX_OFED-${ofed_ver}/${ofed_tgz}" \
-            || { echo "tarball download also failed; continuing with what we have."; return 1; }
-    fi
-    rm -rf "${ofed_dir}"
-    tar xzf "${ofed_tgz}"
-    cd "${ofed_dir}"
-    sudo ./mlnxofedinstall --basic --force --without-fw-update --skip-repo || true
-
-    echo "skipping openibd restart (reboot nodes after install to load new modules)."
-    sudo ldconfig
-
-    echo "post-install check:"
-    command -v ibv_devinfo >/dev/null 2>&1 && ibv_devinfo -l || true
-    command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api
-}
 
 ensure_modern_cmake() {
     local min_ver="3.12.0"
@@ -271,7 +180,7 @@ export DEBIAN_FRONTEND=noninteractive
 REQ_PKGS=(
     nfs-kernel-server cmake gcc g++
     libgflags-dev libnuma-dev numactl memcached libmemcached-dev
-    libboost-all-dev autoconf automake libtool build-essential
+    libboost-all-dev autoconf automake libtool build-essential libibverbs-dev ibverbs-utils libmlx5-dev librdmacm-dev libibumad-dev libibmad-dev infiniband-diags
     python3-paramiko python3-yaml rsync wget software-properties-common
 )
 MISSING_PKGS=()
@@ -301,11 +210,7 @@ if ! ensure_python_cmd; then
     exit 1
 fi
 
-echo "[2/6] checking rdma..."
-if ! ensure_rdma_userspace; then
-    echo "error: rdma userspace is still incomplete (missing ibv_devinfo or ibv_exp_* headers)."
-    exit 1
-fi
+
 
 if ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found'; then
     echo "ok: rdma device found"
@@ -425,26 +330,7 @@ if [[ -n "$MISSING" ]]; then
     sudo apt-get install -y $MISSING
 fi
 
-# Keep CN OFED userspace aligned with MN build/runtime expectations.
-if ! [ -f /usr/include/infiniband/verbs_exp.h ] || ! grep -q "ibv_exp_dct" /usr/include/infiniband/verbs_exp.h 2>/dev/null; then
-    OFED_VER="4.9-5.1.0.0"
-    OFED_OS="ubuntu20.04"
-    REPO_BASE="http://linux.mellanox.com/public/repo/mlnx_ofed/${OFED_VER}/${OFED_OS}/x86_64"
 
-    sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list
-    sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<REOF
-deb [trusted=yes] ${REPO_BASE}/MLNX_LIBS ./
-REOF
-    sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
-    sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
-        libibverbs1 libibverbs-dev ibverbs-utils \
-        libmlx5-1 libmlx5-dev \
-        librdmacm1 librdmacm-dev \
-        libibumad libibmad infiniband-diags \
-        mlnx-ofed-kernel-dkms || true
-
-    echo "skipping openibd restart on CN (reboot to load new modules)."
-fi
 
 sudo ldconfig || true
 
