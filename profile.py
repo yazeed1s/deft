@@ -6,9 +6,9 @@ pc = portal.Context()
 # Parameters
 pc.defineParameter("mn_count", "Memory Nodes", portal.ParameterType.INTEGER, 1)
 pc.defineParameter("cn_count", "Compute Nodes", portal.ParameterType.INTEGER, 5)
-pc.defineParameter("node_type", "Hardware Type", portal.ParameterType.STRING, "d6515")
+pc.defineParameter("node_type", "Hardware Type", portal.ParameterType.STRING, "r650")
 pc.defineParameter("os_image", "Disk Image URN", portal.ParameterType.STRING,
-                   "urn:publicid:IDN+utah.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD")
+                   "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD")
 
 params = pc.bindParameters()
 request = pc.makeRequestRSpec()
@@ -40,13 +40,7 @@ retry() {
     return 1
 }
 
-has_exp_verbs_api() {
-    [ -f /usr/include/infiniband/verbs_exp.h ] && grep -q "ibv_exp_dct" /usr/include/infiniband/verbs_exp.h
-}
 
-has_ofed_49() {
-    command -v ofed_info >/dev/null 2>&1 && ofed_info -s 2>/dev/null | grep -q "MLNX_OFED_LINUX-4.9-5.1.0.0"
-}
 
 # Ensure experiment-LAN IP exists (some single-NIC Clemson nodes miss it at boot).
 SHORT_HOST=$(hostname -s)
@@ -72,7 +66,7 @@ sudo apt-get -f install -y || true
 
 REQ_PKGS="python3 python3-pip python3-yaml python3-paramiko nfs-common \
 cmake gcc g++ libboost-all-dev memcached libgoogle-perftools-dev numactl git \
-autoconf automake libtool build-essential libnuma-dev rdma-core ibverbs-utils infiniband-diags wget curl"
+autoconf automake libtool build-essential libnuma-dev rdma-core ibverbs-utils libibverbs-dev libmlx5-dev librdmacm-dev libibumad-dev libibmad-dev infiniband-diags wget curl"
 MISSING=""
 for p in $REQ_PKGS; do
     dpkg -s "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
@@ -92,30 +86,7 @@ if [ ! -f /usr/local/lib/libcityhash.so ]; then
     sudo ldconfig
 fi
 
-if command -v ibv_devinfo >/dev/null 2>&1 && has_exp_verbs_api; then
-    :
-elif has_ofed_49; then
-    sudo ldconfig || true
-elif ! has_ofed_49; then
-    OFED_OS=$(awk -F= '/^VERSION_ID=/{gsub(/"/,"",$2); if ($2 ~ /^20/) print "ubuntu20.04"; else print "ubuntu18.04"}' /etc/os-release)
-    REPO_BASE="http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}/x86_64"
 
-    sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list
-    sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<OFEDAPT
-deb [trusted=yes] ${REPO_BASE}/MLNX_LIBS ./
-OFEDAPT
-
-    retry 3 10 sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
-    retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
-        libibverbs1 libibverbs-dev ibverbs-utils \
-        libmlx5-1 libmlx5-dev \
-        librdmacm1 librdmacm-dev \
-        libibumad libibmad infiniband-diags \
-        mlnx-ofed-kernel-dkms || true
-
-    # skip openibd restart to avoid dropping network interfaces; reboot instead
-    sudo ldconfig
-fi
 """
 
 # logic for the very first memory node (mn0)
