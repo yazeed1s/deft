@@ -180,7 +180,7 @@ export DEBIAN_FRONTEND=noninteractive
 REQ_PKGS=(
     nfs-kernel-server cmake gcc g++
     libgflags-dev libnuma-dev numactl memcached libmemcached-dev
-    libboost-all-dev autoconf automake libtool build-essential libibverbs-dev ibverbs-utils libmlx5-dev librdmacm-dev libibumad-dev libibmad-dev infiniband-diags
+    libboost-all-dev autoconf automake libtool build-essential libibverbs-dev ibverbs-utils librdmacm-dev libibumad-dev libibmad-dev infiniband-diags
     python3-paramiko python3-yaml rsync wget software-properties-common
 )
 MISSING_PKGS=()
