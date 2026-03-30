@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fix script to remove MLNX_OFED DKMS kernel modules and standardize on CloudLab's
-# in-tree Ubuntu drivers across all nodes (mn0, cn0, cn1).
+# Rebuild RDMA stack for Ubuntu 20.04 CloudLab nodes and sync Deft rnic_id.
 # Run on mn0:
 #   cd /deft_code/deft/script
 #   ./fix_rdma_drivers.sh
+# Optional:
+#   ROOT=/deft_code/deft ./fix_rdma_drivers.sh mn0 cn0 cn1
 
-SSH_USER="${SSH_USER:-$USER}"
+SSH_USER="${SSH_USER:-${SUDO_USER:-$USER}}"
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8)
-
-ROOT="/deft_code/deft"
+ROOT="${ROOT:-/deft_code/deft}"
 CFG="${ROOT}/script/global_config.yaml"
+
+log() {
+  echo "[$(date +%H:%M:%S)] $*"
+}
 
 discover_nodes() {
   awk '
@@ -19,7 +23,8 @@ discover_nodes() {
       for (i = 2; i <= NF; i++) {
         if ($i ~ /^(mn|cn)[0-9]+$/) print $i
       }
-    }' /etc/hosts | sort -u
+    }
+  ' /etc/hosts | sort -u
 }
 
 run_remote() {
@@ -29,81 +34,135 @@ run_remote() {
 }
 
 if [[ "$(hostname -s)" != "mn0" ]]; then
-  echo "error: run this script on mn0"
-  exit 1
+  log "warning: expected to run on mn0 (current: $(hostname -s))"
 fi
 
-mapfile -t NODES < <(if [[ "$#" -gt 0 ]]; then printf '%s\n' "$@"; else discover_nodes; fi)
+mapfile -t NODES < <(
+  if [[ "$#" -gt 0 ]]; then
+    printf '%s\n' "$@"
+  else
+    discover_nodes
+  fi
+)
+
 if [[ "${#NODES[@]}" -eq 0 ]]; then
-  echo "error: no nodes found in /etc/hosts (10.10.1.x map)"
+  echo "error: no nodes found (pass nodes explicitly or fix /etc/hosts)"
   exit 1
 fi
 
-echo "nodes: ${NODES[*]}"
+log "nodes: ${NODES[*]}"
 
-echo "== [1/3] Removing MLNX_OFED DKMS Kernel Modules on all nodes =="
+log "[1/4] Purging stale OFED bits and reinstalling Ubuntu RDMA userspace"
 for n in "${NODES[@]}"; do
-  echo "-- ${n}"
+  log "-- ${n}"
   run_remote "${n}" "sudo bash -s" <<'REMOTE'
-set -x
+set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
-# Remove the brittle DKMS module that fails to build on 5.4.0-212
-if dpkg -l | grep -q mlnx-ofed-kernel-dkms; then
-  sudo dkms remove mlnx-ofed-kernel/4.9 --all || true
-  sudo apt-get remove --purge -y mlnx-ofed-kernel-dkms mlnx-ofed-kernel-utils
+if command -v mlnxofeduninstall >/dev/null 2>&1; then
+  sudo mlnxofeduninstall --force || true
 fi
 
-# Reload the in-tree modules (roce naming: rocepX...)
-sudo modprobe -r mlx5_ib || true
-sudo modprobe -r mlx5_core || true
-sudo modprobe mlx5_core
-sudo modprobe mlx5_ib
+OLD_PKGS="$(dpkg-query -W -f='${Package}\n' 2>/dev/null | \
+  grep -E '^(mlnx-ofed|mlnx-fw-updater|ofed-|openibd|mstflint)' || true)"
+if [[ -n "${OLD_PKGS}" ]]; then
+  sudo apt-get purge -y ${OLD_PKGS} || true
+fi
 
-# Wait for devices to come back up
-sleep 3
+sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list || true
+sudo apt-get update -y
+sudo apt-get install -y --no-install-recommends \
+  rdma-core ibverbs-utils ibverbs-providers \
+  libibverbs1 libibverbs-dev \
+  librdmacm1 librdmacm-dev \
+  infiniband-diags
+
+sudo modprobe ib_uverbs || true
+sudo modprobe rdma_cm || true
+sudo modprobe mlx5_core || true
+sudo modprobe mlx5_ib || true
 REMOTE
+
 done
 
-echo "== [2/3] Verifying Device Naming (Should use 'rocepX' format everywhere) =="
-declare -A NODE_DEV=()
+log "[2/4] Validating verbs stack on each node"
 for n in "${NODES[@]}"; do
-  echo "-- ${n}"
-  # Check what device has the 10.10.1.x IP
-  dev="$(run_remote "${n}" "show_gids | awk '/10\\.10\\.1\\./ {print \$1; exit}'" | awk 'NF{print $1; exit}')"
-  if [[ -z "${dev}" ]]; then
-    # Fallback if show_gids isn't ready
-    dev="$(run_remote "${n}" "ibv_devinfo -l" | grep -o 'roce[a-z0-9]*' | head -n 1 || true)"
-  fi
-  NODE_DEV["${n}"]="${dev}"
-  echo "  RDMA device: ${dev}"
+  log "-- ${n}"
+  run_remote "${n}" "bash -lc '
+    echo hostname: \\$(hostname -s)
+    ibv_devinfo -l || true
+    show_gids 2>/dev/null | sed -n "1,40p" || true
+    ldconfig -p | egrep "libibverbs|libmlx5|librdmacm" || true
+  '"
 done
 
-echo "== [3/3] Updating Global Config =="
+detect_rnic_id_remote() {
+  local node="$1"
+  run_remote "${node}" "bash -lc '
+    dev=\\$(show_gids 2>/dev/null | awk "/10\\.10\\.1\\./{print \\\$1; exit}")
+    if [[ -z \\\"\\${dev}\\\" ]]; then
+      dev=\\$(ibv_devinfo -l 2>/dev/null | awk "NF{print \\\$1; exit}")
+    fi
+
+    if [[ \\\"\\${dev}\\\" =~ _([0-9]+)\\$ ]]; then
+      echo \\\"\\${BASH_REMATCH[1]}\\\"
+    elif [[ \\\"\\${dev}\\\" =~ f([0-9]+)\\$ ]]; then
+      echo \\\"\\${BASH_REMATCH[1]}\\\"
+    else
+      echo 0
+    fi
+  '" | tr -d '[:space:]'
+}
+
+log "[3/4] Computing rnic_id"
+declare -A COUNT=()
+declare -A NODE_ID=()
+for n in "${NODES[@]}"; do
+  id="$(detect_rnic_id_remote "$n")"
+  [[ -z "$id" ]] && id=0
+  NODE_ID["$n"]="$id"
+  COUNT["$id"]=$(( ${COUNT["$id"]:-0} + 1 ))
+  log "  ${n}: rnic_id candidate=${id}"
+done
+
+BEST_ID=0
+BEST_COUNT=-1
+for id in "${!COUNT[@]}"; do
+  if (( COUNT[$id] > BEST_COUNT )); then
+    BEST_COUNT=${COUNT[$id]}
+    BEST_ID=$id
+  fi
+done
+
+log "selected rnic_id=${BEST_ID} (majority across nodes)"
+
 if [[ ! -f "${CFG}" ]]; then
-  echo "error: missing ${CFG}; generate it first."
-  exit 1
+  log "warning: ${CFG} not found; generating config first"
+  if [[ -x "${ROOT}/script/gen_config.py" ]]; then
+    python3 "${ROOT}/script/gen_config.py"
+  else
+    echo "error: missing ${ROOT}/script/gen_config.py"
+    exit 1
+  fi
 fi
 
-# The in-tree drivers produce device names like 'rocep202s0f0' or 'roceo12399'.
-# In Deft's Resource.cpp, rnic_id is matching the last digit of these names.
-# Often 'rocep202s0f0' => rnic_id=0, 'rocep202s0f1' => rnic_id=1.
-# We will set a default of 0 which works for most CloudLab topologies.
-COMMON_ID=0
-
-python3 - "${CFG}" "${COMMON_ID}" <<'PY'
+log "[4/4] Writing rnic_id to ${CFG}"
+python3 - "${CFG}" "${BEST_ID}" <<'PY'
 import sys
 import yaml
 
 cfg_path = sys.argv[1]
 rnic_id = int(sys.argv[2])
+
 with open(cfg_path, "r") as f:
     cfg = yaml.safe_load(f) or {}
+
 cfg["rnic_id"] = rnic_id
+
 with open(cfg_path, "w") as f:
     yaml.safe_dump(cfg, f, sort_keys=False)
+
 print(f"updated {cfg_path} with rnic_id={rnic_id}")
 PY
 
-echo "Done! The cluster is now using uniform in-tree RDMA drivers."
-echo "You can now run Deft benchmarks."
+log "done. next: python3 ${ROOT}/script/run_bench.py --smoke"
