@@ -211,33 +211,6 @@ if ! ensure_python_cmd; then
 fi
 
 
-
-if [[ ! -f /usr/include/infiniband/verbs_exp.h ]]; then
-    echo "installing MLNX_OFED 4.9 user-space libraries..."
-    OFED_OS="ubuntu18.04"
-    if grep -q 'VERSION_ID="20.04"' /etc/os-release; then OFED_OS="ubuntu20.04"; fi
-    REPO_BASE="http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}/x86_64"
-
-    sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list
-    sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<OFEDAPT
-deb [trusted=yes] ${REPO_BASE}/MLNX_LIBS ./
-OFEDAPT
-
-    retry 3 10 sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
-    retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
-        libibverbs1 libibverbs-dev ibverbs-utils \
-        libmlx5-1 libmlx5-dev \
-        librdmacm1 librdmacm-dev \
-        libibumad libibmad infiniband-diags || true
-    sudo ldconfig
-fi
-
-if ibv_devinfo -l | grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs found'; then
-    echo "ok: rdma device found"
-else
-    echo "warning: no rdma device found in ibv_devinfo output."
-fi
-
 echo "[3/6] syncing repository to ${DEFT_ROOT}..."
 sudo mkdir -p "$DEFT_ROOT"
 sudo chown "$REAL_USER:$REAL_GROUP" /deft_code "$DEFT_ROOT"
@@ -350,27 +323,6 @@ if [[ -n "$MISSING" ]]; then
     sudo apt-get install -y $MISSING
 fi
 
-
-
-if [[ ! -f /usr/include/infiniband/verbs_exp.h ]]; then
-    OFED_OS="ubuntu18.04"
-    if grep -q 'VERSION_ID="20.04"' /etc/os-release; then OFED_OS="ubuntu20.04"; fi
-    REPO_BASE="http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}/x86_64"
-
-    sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list
-    sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<OFEDAPT
-deb [trusted=yes] ${REPO_BASE}/MLNX_LIBS ./
-OFEDAPT
-
-    sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
-    sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
-        libibverbs1 libibverbs-dev ibverbs-utils \
-        libmlx5-1 libmlx5-dev \
-        librdmacm1 librdmacm-dev \
-        libibumad libibmad infiniband-diags || true
-fi
-
-sudo ldconfig || true
 
 # client/server binaries are dynamically linked against libcityhash from /usr/local/lib.
 if ! ldconfig -p | grep -q 'libcityhash\.so'; then
