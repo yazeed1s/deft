@@ -8,7 +8,7 @@ pc.defineParameter("mn_count", "Memory Nodes", portal.ParameterType.INTEGER, 1)
 pc.defineParameter("cn_count", "Compute Nodes", portal.ParameterType.INTEGER, 5)
 pc.defineParameter("node_type", "Hardware Type", portal.ParameterType.STRING, "r650")
 pc.defineParameter("os_image", "Disk Image URN", portal.ParameterType.STRING,
-                   "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU20-64-STD")
+                   "urn:publicid:IDN+clemson.cloudlab.us+image+emulab-ops:UBUNTU18-64-STD")
 
 params = pc.bindParameters()
 request = pc.makeRequestRSpec()
@@ -71,9 +71,28 @@ MISSING=""
 for p in $REQ_PKGS; do
     dpkg -s "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
 done
-if [ -n "$MISSING" ]; then
-    retry 5 10 sudo apt-get update -q
-    retry 5 10 sudo apt-get install -y $MISSING
+if [[ -n "$MISSING" ]]; then
+    retry 3 10 sudo apt-get update -q
+    retry 3 10 sudo apt-get install -y $MISSING
+fi
+
+if [[ ! -f /usr/include/infiniband/verbs_exp.h ]]; then
+    OFED_OS=$(awk -F= '/^VERSION_ID=/{gsub(/"/,"",$2); if ($2 ~ /^20/) print "ubuntu20.04"; else print "ubuntu18.04"}' /etc/os-release)
+    REPO_BASE="http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}/x86_64"
+
+    sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list
+    sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<OFEDAPT
+deb [trusted=yes] ${REPO_BASE}/MLNX_LIBS ./
+OFEDAPT
+
+    retry 3 10 sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
+    retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
+        libibverbs1 libibverbs-dev ibverbs-utils \
+        libmlx5-1 libmlx5-dev \
+        librdmacm1 librdmacm-dev \
+        libibumad libibmad infiniband-diags || true
+
+    sudo ldconfig
 fi
 
 if [ ! -f /usr/local/lib/libcityhash.so ]; then
