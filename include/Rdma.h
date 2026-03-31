@@ -67,7 +67,11 @@ bool createContext(RdmaContext *context, int nic_id = 0, uint8_t port = 1,
                    int gidIndex = 3);
 bool destoryContext(RdmaContext *context);
 
-ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx);
+ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx,
+                           int access_flags = IBV_ACCESS_LOCAL_WRITE |
+                                              IBV_ACCESS_REMOTE_READ |
+                                              IBV_ACCESS_REMOTE_WRITE |
+                                              IBV_ACCESS_REMOTE_ATOMIC);
 ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize,
                                  RdmaContext *ctx);
 

@@ -211,21 +211,20 @@ bool destoryContext(RdmaContext *context) {
   return rc;
 }
 
-ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx) {
+ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx,
+                           int access_flags) {
 
   ibv_mr *mr = NULL;
-  const int mr_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
-                       IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
   Debug::notifyInfo("RDMA MR: register addr=0x%" PRIx64 " size=%" PRIu64
                     " flags=0x%x devIndex=%u port=%u gidIndex=%d",
-                    mm, mmSize, mr_flags, ctx->devIndex, ctx->port,
+                    mm, mmSize, access_flags, ctx->devIndex, ctx->port,
                     ctx->gidIndex);
-  mr = ibv_reg_mr(ctx->pd, (void *)mm, mmSize, mr_flags);
+  mr = ibv_reg_mr(ctx->pd, (void *)mm, mmSize, access_flags);
 
   if (!mr) {
     Debug::notifyError("RDMA MR: registration failed addr=0x%" PRIx64
                        " size=%" PRIu64 " flags=0x%x errno=%d (%s)",
-                       mm, mmSize, mr_flags, errno, strerror(errno));
+                       mm, mmSize, access_flags, errno, strerror(errno));
     exit(-1);
   }
   Debug::notifyInfo("RDMA MR: success lkey=0x%x rkey=0x%x", mr->lkey, mr->rkey);

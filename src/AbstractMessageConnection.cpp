@@ -14,8 +14,9 @@ AbstractMessageConnection::AbstractMessageConnection(
   modifyUDtoRTS(message, &ctx);
 
   messagePool = hugePageAlloc(2 * messageNR * MESSAGE_SIZE);
-  messageMR = createMemoryRegion((uint64_t)messagePool,
-                                 2 * messageNR * MESSAGE_SIZE, &ctx);
+  messageMR =
+      createMemoryRegion((uint64_t)messagePool, 2 * messageNR * MESSAGE_SIZE,
+                         &ctx, IBV_ACCESS_LOCAL_WRITE);
   sendPool = (char *)messagePool + messageNR * MESSAGE_SIZE;
   messageLkey = messageMR->lkey;
 }
