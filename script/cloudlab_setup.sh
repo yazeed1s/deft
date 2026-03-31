@@ -160,6 +160,39 @@ ensure_python_cmd() {
     return 1
 }
 
+ensure_ofed49_userspace() {
+    local ofed_os
+    local repo_base
+
+    ofed_os="ubuntu18.04"
+    if [[ -r /etc/os-release ]]; then
+        if grep -q 'VERSION_ID="20.04"' /etc/os-release; then
+            ofed_os="ubuntu20.04"
+        fi
+    fi
+    repo_base="http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${ofed_os}/x86_64"
+
+    echo "ensuring MLNX_OFED 4.9 user-space libraries (${ofed_os})..."
+
+    sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list /etc/apt/preferences.d/*mlnx* /etc/apt/preferences.d/*ofed* || true
+    sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<OFEDAPT
+deb [trusted=yes] ${repo_base}/MLNX_LIBS ./
+OFEDAPT
+
+    # Avoid Ubuntu/MLNX mixed RDMA stacks.
+    sudo apt-get purge -y rdma-core ibverbs-providers || true
+    sudo apt-get -f install -y || true
+
+    retry 3 10 sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
+    retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
+        libibverbs1 libibverbs-dev ibverbs-utils \
+        libmlx5-1 libmlx5-dev \
+        librdmacm1 librdmacm-dev \
+        libibumad libibmad infiniband-diags
+
+    sudo ldconfig
+}
+
 if [[ "$(hostname)" != "mn0" && "$(hostname)" != mn0.* ]]; then
     echo "error: please run on mn0"
     exit 1
@@ -180,7 +213,7 @@ export DEBIAN_FRONTEND=noninteractive
 REQ_PKGS=(
     nfs-kernel-server cmake gcc g++
     libgflags-dev libnuma-dev numactl memcached libmemcached-dev
-    libboost-all-dev autoconf automake libtool build-essential libibverbs-dev ibverbs-utils librdmacm-dev libibumad-dev libibmad-dev infiniband-diags
+    libboost-all-dev autoconf automake libtool build-essential
     python3-paramiko python3-yaml rsync wget software-properties-common
 )
 MISSING_PKGS=()
@@ -209,6 +242,7 @@ if ! ensure_python_cmd; then
     echo "error: unable to ensure python command uses Python 3."
     exit 1
 fi
+ensure_ofed49_userspace
 
 
 echo "[3/6] syncing repository to ${DEFT_ROOT}..."
@@ -313,18 +347,7 @@ for node in "${CLUSTER_NODES[@]}"; do
     if ! sudo -u "$REAL_USER" ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 "${REAL_USER}@${target}" "bash -s" <<'EOF'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
-REQ_PKGS="libmemcached11 libmemcached-dev libnuma1 numactl nfs-common libgflags2.2 libgflags-dev libboost-all-dev libgoogle-perftools-dev rdma-core ibverbs-utils"
-MISSING=""
-for p in $REQ_PKGS; do
-    dpkg -s "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
-done
-if [[ -n "$MISSING" ]]; then
-    sudo apt-get update -q
-    sudo apt-get install -y $MISSING
-fi
 
-
-# client/server binaries are dynamically linked against libcityhash from /usr/local/lib.
 if ! ldconfig -p | grep -q 'libcityhash\.so'; then
     cd /tmp
     if [[ ! -d cityhash ]]; then

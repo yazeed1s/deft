@@ -168,12 +168,20 @@ fi
 echo "[6/6] verifying mn -> cn passwordless ssh..."
 AUTH_FAIL=()
 for cn in "${CN_HOSTS[@]}"; do
-    target="${CN_SHORT_BY_HOST[${cn}]}"
-    if [[ -z "${target}" || "${target}" != cn* ]]; then
-        target="${cn}"
+    targets=("$cn")
+    short="${CN_SHORT_BY_HOST[${cn}]:-}"
+    if [[ -n "${short}" && "${short}" != "${cn}" ]]; then
+        targets+=("${short}")
     fi
-    if ! remote "${MN_HOST}" "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 '${SSH_USER}@${target}' 'hostname >/dev/null'"; then
-        AUTH_FAIL+=("${target}")
+    ok=0
+    for t in "${targets[@]}"; do
+        if remote "${MN_HOST}" "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 '${SSH_USER}@${t}' 'hostname >/dev/null'"; then
+            ok=1
+            break
+        fi
+    done
+    if [[ $ok -eq 0 ]]; then
+        AUTH_FAIL+=("${targets[*]}")
     fi
 done
 if [[ "${#AUTH_FAIL[@]}" -gt 0 ]]; then

@@ -66,7 +66,7 @@ sudo apt-get -f install -y || true
 
 REQ_PKGS="python3 python3-pip python3-yaml python3-paramiko nfs-common \
 cmake gcc g++ libboost-all-dev memcached libgoogle-perftools-dev numactl git \
-autoconf automake libtool build-essential libnuma-dev rdma-core ibverbs-utils libibverbs-dev libmlx5-dev librdmacm-dev libibumad-dev libibmad-dev infiniband-diags wget curl"
+autoconf automake libtool build-essential libnuma-dev wget curl"
 MISSING=""
 for p in $REQ_PKGS; do
     dpkg -s "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
@@ -76,24 +76,9 @@ if [[ -n "$MISSING" ]]; then
     retry 3 10 sudo apt-get install -y $MISSING
 fi
 
-if [[ ! -f /usr/include/infiniband/verbs_exp.h ]]; then
-    OFED_OS=$(awk -F= '/^VERSION_ID=/{gsub(/"/,"",$2); if ($2 ~ /^20/) print "ubuntu20.04"; else print "ubuntu18.04"}' /etc/os-release)
-    REPO_BASE="http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}/x86_64"
-
-    sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list
-    sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<OFEDAPT
-deb [trusted=yes] ${REPO_BASE}/MLNX_LIBS ./
-OFEDAPT
-
-    retry 3 10 sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
-    retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
-        libibverbs1 libibverbs-dev ibverbs-utils \
-        libmlx5-1 libmlx5-dev \
-        librdmacm1 librdmacm-dev \
-        libibumad libibmad infiniband-diags || true
-
-    sudo ldconfig
-fi
+# Intentionally do not install any RDMA stack here.
+# cloudlab_setup.sh performs a deterministic OFED 4.9 installation to avoid
+# mixed Ubuntu/MLNX package states across nodes.
 
 if [ ! -f /usr/local/lib/libcityhash.so ]; then
     cd /tmp
