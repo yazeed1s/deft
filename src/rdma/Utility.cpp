@@ -1,4 +1,6 @@
 #include "Rdma.h"
+#include <cerrno>
+#include <cstring>
 
 int kMaxDeviceMemorySize = 0;
 
@@ -41,19 +43,22 @@ void checkDMSupported(struct ibv_context *ctx) {
   attrs.comp_mask |= IBV_EXP_DEVICE_ATTR_MAX_DM_SIZE;
 
   if (ibv_exp_query_device(ctx, &attrs)) {
-    printf("Couldn't query device attributes\n");
+    Debug::notifyError("RDMA device query failed errno=%d (%s)", errno,
+                       strerror(errno));
     kMaxDeviceMemorySize = 0;
     return;
   }
 
   if (!(attrs.comp_mask & IBV_EXP_DEVICE_ATTR_MAX_DM_SIZE)) {
-    fprintf(stderr, "Can not support device memory!\n");
+    Debug::notifyInfo("RDMA device memory unsupported on this RNIC");
     kMaxDeviceMemorySize = 0;
     return;
   } else if (!(attrs.max_dm_size)) {
+    Debug::notifyInfo("RDMA device memory supported but max_dm_size=0");
     kMaxDeviceMemorySize = 0;
   } else {
     kMaxDeviceMemorySize = attrs.max_dm_size;
-    printf("The RNIC has %dKB device memory\n", kMaxDeviceMemorySize / 1024);
+    Debug::notifyInfo("The RNIC has %dKB device memory",
+                      kMaxDeviceMemorySize / 1024);
   }
 }

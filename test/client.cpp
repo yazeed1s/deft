@@ -342,10 +342,10 @@ void thread_run(int id) {
 void print_args() {
   printf(
       "ServerCount %d, ClientCount %d, PrefillThreadCount %d, BenchThreadCount "
-      "%d, ReadRatio %d, "
-      "Zipfan %.3lf\n",
+      "%d, ReadRatio %d, Zipfan %.3lf, Numa %d, Rnic %d\n",
       FLAGS_server_count, FLAGS_client_count, FLAGS_num_prefill_threads,
-      FLAGS_num_bench_threads, FLAGS_read_ratio, FLAGS_zipf);
+      FLAGS_num_bench_threads, FLAGS_read_ratio, FLAGS_zipf, FLAGS_numa_id,
+      FLAGS_rnic_id);
 }
 
 int main(int argc, char *argv[]) {

@@ -10,6 +10,11 @@ DirectoryConnection::DirectoryConnection(uint16_t dirID, void *dsmPool,
                                          uint16_t rnic_id,
                                          RemoteConnectionToClient *remote_con)
     : dirID(dirID), remote_con_(remote_con) {
+  Debug::notifyInfo(
+      "DirectoryConnection init: dirID=%u rnic_id=%u dsmPool=%p dsmSize=%llu "
+      "num_client=%u",
+      dirID, rnic_id, dsmPool, static_cast<unsigned long long>(dsmSize),
+      num_client);
   if (!createContext(&ctx, rnic_id)) {
     Debug::notifyError("createContext failed on server (rnic_id=%u)", rnic_id);
     std::abort();
@@ -29,6 +34,8 @@ DirectoryConnection::DirectoryConnection(uint16_t dirID, void *dsmPool,
   this->dsmSize = dsmSize;
   this->dsmMR = createMemoryRegion((uint64_t)dsmPool, dsmSize, &ctx);
   this->dsmLKey = dsmMR->lkey;
+  Debug::notifyInfo("DirectoryConnection: dirID=%u dsm MR lkey=0x%x", dirID,
+                    dsmLKey);
 
   // on-chip lock memory
   if (dirID == 0) {
@@ -49,6 +56,8 @@ DirectoryConnection::DirectoryConnection(uint16_t dirID, void *dsmPool,
       }
     }
     this->lockLKey = lockMR->lkey;
+    Debug::notifyInfo("DirectoryConnection: dirID=%u lock MR lkey=0x%x", dirID,
+                      lockLKey);
   }
 
   // app, RC
@@ -60,6 +69,9 @@ DirectoryConnection::DirectoryConnection(uint16_t dirID, void *dsmPool,
         Debug::notifyError("createQueuePair failed on server");
         std::abort();
       }
+      Debug::notifyInfo("DirectoryConnection: dirID=%u appThread=%d client=%zu "
+                        "qpn=%u",
+                        dirID, i, k, data2app[i][k]->qp_num);
     }
   }
 }

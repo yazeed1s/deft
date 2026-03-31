@@ -177,13 +177,12 @@ def main():
                     f'cd {exe_path} && '
                     'sudo sh -c "echo 3 > /proc/sys/vm/drop_caches" && '
                     f'numactl --membind={numa_id} --cpunodebind={numa_id} '
-                    f'stdbuf -oL -eL env '
-                    'IBV_DRIVERS=mlx5 '
-                    'LD_LIBRARY_PATH=/usr/lib/libibverbs:/usr/lib/x86_64-linux-gnu/libibverbs:$LD_LIBRARY_PATH '
+                    f'stdbuf -oL -eL '
                     f'./{g_cfg["server_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
                     f'--numa_id {numa_id} --rnic_id {rnic_id} > ../log/server_{i}.log 2>&1'
                 )
+                print(f'  server {i} cmd: {cmd}')
 
                 ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
                 server_sshs.append(ssh)
@@ -203,9 +202,7 @@ def main():
                 cmd = (
                     f'cd {exe_path} && '
                     f'numactl --membind={numa_id} --cpunodebind={numa_id} '
-                    f'stdbuf -oL -eL env '
-                    'IBV_DRIVERS=mlx5 '
-                    'LD_LIBRARY_PATH=/usr/lib/libibverbs:/usr/lib/x86_64-linux-gnu/libibverbs:$LD_LIBRARY_PATH '
+                    f'stdbuf -oL -eL '
                     f'./{g_cfg["client_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
                     f'--numa_id {numa_id} --rnic_id {rnic_id} --num_prefill_threads {num_prefill_threads} '
@@ -213,6 +210,7 @@ def main():
                     f'--read_ratio {read_ratio} --zipf {zipf} '
                     f'> ../log/client_{i}.log 2>&1'
                 )
+                print(f'  client {i} cmd: {cmd}')
                 ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
                 client_sshs.append(ssh)
                 client_stdouts.append(stdout)

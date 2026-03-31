@@ -21,13 +21,11 @@ DEFINE_int32(client_count, 1, "client count");
 // int kReadRatio;
 // double zipfan = 0;
 
-
-
 DSMServer *dsm_server;
 
 void print_args() {
-  printf("ServerCount %d, ClientCount %d\n", FLAGS_server_count,
-         FLAGS_client_count);
+  printf("ServerCount %d, ClientCount %d, Numa %d, Rnic %d\n",
+         FLAGS_server_count, FLAGS_client_count, FLAGS_numa_id, FLAGS_rnic_id);
 }
 
 int main(int argc, char *argv[]) {
