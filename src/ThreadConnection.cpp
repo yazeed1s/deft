@@ -32,7 +32,11 @@ ThreadConnection::ThreadConnection(uint16_t threadID, void *cachePool,
   message = new RawMessageConnection(ctx, rpc_cq, APP_MESSAGE_NR);
 
   this->cachePool = cachePool;
-  cacheMR = createMemoryRegion((uint64_t)cachePool, cacheSize, &ctx);
+  cacheMR =
+      createMemoryRegion((uint64_t)cachePool, cacheSize, &ctx,
+                         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+                             IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC,
+                         "cache");
   cacheLKey = cacheMR->lkey;
   Debug::notifyInfo("ThreadConnection: thread=%u cache MR lkey=0x%x", threadID,
                     cacheLKey);

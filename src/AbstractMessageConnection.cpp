@@ -16,7 +16,7 @@ AbstractMessageConnection::AbstractMessageConnection(
   messagePool = hugePageAlloc(2 * messageNR * MESSAGE_SIZE);
   messageMR =
       createMemoryRegion((uint64_t)messagePool, 2 * messageNR * MESSAGE_SIZE,
-                         &ctx, IBV_ACCESS_LOCAL_WRITE);
+                         &ctx, IBV_ACCESS_LOCAL_WRITE, "message");
   sendPool = (char *)messagePool + messageNR * MESSAGE_SIZE;
   messageLkey = messageMR->lkey;
 }

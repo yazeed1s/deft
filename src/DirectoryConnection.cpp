@@ -32,7 +32,11 @@ DirectoryConnection::DirectoryConnection(uint16_t dirID, void *dsmPool,
   // dsm memory
   this->dsmPool = dsmPool;
   this->dsmSize = dsmSize;
-  this->dsmMR = createMemoryRegion((uint64_t)dsmPool, dsmSize, &ctx);
+  this->dsmMR =
+      createMemoryRegion((uint64_t)dsmPool, dsmSize, &ctx,
+                         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+                             IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC,
+                         "dsm");
   this->dsmLKey = dsmMR->lkey;
   Debug::notifyInfo("DirectoryConnection: dirID=%u dsm MR lkey=0x%x", dirID,
                     dsmLKey);
@@ -48,8 +52,11 @@ DirectoryConnection::DirectoryConnection(uint16_t dirID, void *dsmPool,
           "on-chip lock memory unavailable; falling back to host memory");
       this->lockPool = hugePageAlloc(this->lockSize);
       memset(this->lockPool, 0, this->lockSize);
-      this->lockMR =
-          createMemoryRegion((uint64_t)this->lockPool, this->lockSize, &ctx);
+      this->lockMR = createMemoryRegion(
+          (uint64_t)this->lockPool, this->lockSize, &ctx,
+          IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+              IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC,
+          "lock");
       if (!this->lockMR) {
         Debug::notifyError("failed to register fallback host lock memory");
         std::abort();

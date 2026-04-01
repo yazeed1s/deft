@@ -26,7 +26,7 @@
 
 #define LATENCY_WINDOWS 1000000
 
-#define STRUCT_OFFSET(type, field) \
+#define STRUCT_OFFSET(type, field)                                             \
   (char *)&((type *)(0))->field - (char *)((type *)(0))
 
 #define MAX_MACHINE 8 // number of servers
@@ -90,8 +90,8 @@ constexpr uint64_t kLockStartAddr = 0;
 constexpr uint64_t kLockChipMemSize = 256 * 1024;
 
 // number of locks
-// we do not use 16-bit locks, since 64-bit locks can provide enough concurrency.
-// if you want to use 16-bit locks, call *cas_dm_mask*
+// we do not use 16-bit locks, since 64-bit locks can provide enough
+// concurrency. if you want to use 16-bit locks, call *cas_dm_mask*
 constexpr uint64_t kLockSize = 16;
 constexpr uint64_t kNumOfLock = kLockChipMemSize / kLockSize;
 
@@ -99,12 +99,12 @@ constexpr uint64_t kNumOfLock = kLockChipMemSize / kLockSize;
 constexpr uint64_t kMaxLevelOfTree = 7;
 
 constexpr uint16_t kMaxCoro = 8;
-constexpr int64_t kPerThreadRdmaBuf  = 12 * MB;
+constexpr int64_t kPerThreadRdmaBuf = 12 * MB;
 constexpr int64_t kPerCoroRdmaBuf = kPerThreadRdmaBuf / kMaxCoro;
 
 constexpr uint8_t kMaxHandOverTime = 0;
 
-constexpr int kIndexCacheSize = 1024;  // MB
+constexpr int kIndexCacheSize = 1024; // MB
 } // namespace define
 
 static inline unsigned long long asm_rdtsc(void) {
@@ -132,11 +132,13 @@ struct KeyArr {
   uint64_t arr[arr_cnt];
   KeyArr() { arr[0] = 0; };
   KeyArr(const uint64_t k) {
-    for (size_t i = 0; i < arr_cnt; ++i) arr[i] = k;
+    for (size_t i = 0; i < arr_cnt; ++i)
+      arr[i] = k;
   };
 
   KeyArr &operator=(const KeyArr &other) {
-    for (size_t i = 0; i < arr_cnt; ++i) arr[i] = other.arr[i];
+    for (size_t i = 0; i < arr_cnt; ++i)
+      arr[i] = other.arr[i];
     return *this;
   }
 
