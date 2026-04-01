@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run locally: install mn SSH pubkey on CN nodes and verify mn->cn passwordless SSH.
+# runs locally: install mn SSH pubkey on CN nodes and verify mn->cn passwordless SSH.
 set -euo pipefail
 
 usage() {

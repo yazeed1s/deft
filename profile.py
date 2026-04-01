@@ -59,7 +59,6 @@ if [ -n "$TARGET_IP" ] && ! ip -4 -o addr show | grep -q "10\\.10\\.1\\."; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
-# Heal interrupted apt/dpkg state before installs.
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock || true
 sudo dpkg --configure -a || true
 sudo apt-get -f install -y || true
@@ -75,21 +74,6 @@ if [[ -n "$MISSING" ]]; then
     retry 3 10 sudo apt-get update -q
     retry 3 10 sudo apt-get install -y $MISSING
 fi
-
-# Intentionally do not install any RDMA stack here.
-# cloudlab_setup.sh performs a deterministic OFED 4.9 installation to avoid
-# mixed Ubuntu/MLNX package states across nodes.
-
-if [ ! -f /usr/local/lib/libcityhash.so ]; then
-    cd /tmp
-    [ -d cityhash ] || git clone https://github.com/google/cityhash.git
-    cd cityhash
-    ./configure
-    make all check -j$(nproc)
-    sudo make install
-    sudo ldconfig
-fi
-
 
 """
 
@@ -120,12 +104,10 @@ def create_node(name, ip_suffix, is_first_mn):
     node.hardware_type = NODE_TYPE
     node.disk_image = OS_IMAGE
 
-    # Use eth1 for RDMA to keep the SSH control network clean
     iface = node.addInterface("eth1")
     iface.addAddress(pg.IPv4Address("10.10.1." + str(ip_suffix), "255.255.255.0"))
     lan.addInterface(iface)
 
-    # Append the specific NFS logic based on node role
     if is_first_mn:
         full_script = common_setup + nfs_server_logic
     else:
@@ -134,13 +116,10 @@ def create_node(name, ip_suffix, is_first_mn):
     node.addService(pg.Execute(shell="bash", command=full_script))
     return node
 
-# Memory Nodes: Only the first one (i=0) becomes the NFS server
 for i in range(params.mn_count):
     create_node("mn" + str(i), i + 1, is_first_mn=(i == 0))
 
-# Compute Nodes: All are NFS clients
 for i in range(params.cn_count):
-    # IP suffix continues after the memory nodes
     create_node("cn" + str(i), params.mn_count + i + 1, is_first_mn=False)
 
 pc.printRequestRSpec(request)

@@ -13,10 +13,14 @@
 
 char *getIP();
 inline void *hugePageAlloc(size_t size) {
+  const char *force_hp = std::getenv("DEFT_FORCE_HUGEPAGE");
   const char *disable_hp = std::getenv("DEFT_DISABLE_HUGEPAGE");
-  const bool use_hugetlb =
-      !(disable_hp &&
-        (strcmp(disable_hp, "1") == 0 || strcasecmp(disable_hp, "true") == 0));
+  const bool force_hugetlb = (force_hp && (strcmp(force_hp, "1") == 0 ||
+                                           strcasecmp(force_hp, "true") == 0));
+  const bool disable_hugetlb =
+      (disable_hp &&
+       (strcmp(disable_hp, "1") == 0 || strcasecmp(disable_hp, "true") == 0));
+  const bool use_hugetlb = force_hugetlb || !disable_hugetlb;
 
   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
   if (use_hugetlb) {

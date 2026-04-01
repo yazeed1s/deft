@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure NFS export on mn0 and mount /deft_code on all cluster nodes.
+# NFS export on mn0 and mount /deft_code on all cluster nodes.
 set -euo pipefail
 
 NFS_PATH="${1:-/deft_code}"

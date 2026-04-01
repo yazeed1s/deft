@@ -92,6 +92,8 @@ def main():
     parser.add_argument("--small", action="store_true", help="run small benchmark")
     parser.add_argument("--mid", action="store_true", help="run medium benchmark")
     parser.add_argument("--big", action="store_true", help="run big benchmark")
+    parser.add_argument("--force-hugepage", action="store_true",
+                        help="set DEFT_FORCE_HUGEPAGE=1 instead of DEFT_DISABLE_HUGEPAGE=1")
     parser.add_argument("--name", type=str, default="", help="name for result file")
     args, _ = parser.parse_known_args()
 
@@ -151,6 +153,8 @@ def main():
     password = g_cfg['password']
     # Clemson/CloudLab experiment network is typically on mlx5_2 (10.10.1.x).
     rnic_id = int(g_cfg.get('rnic_id', 2))
+    hp_env = "DEFT_FORCE_HUGEPAGE=1" if args.force_hugepage else "DEFT_DISABLE_HUGEPAGE=1"
+    print(f"memory mode: {'force_hugepage' if args.force_hugepage else 'disable_hugepage'}")
 
     with open(file_name, 'w') as fp:
         product_list = list(product(key_space_arr, read_ratio_arr, zipf_arr, threads_CN_arr))
@@ -177,7 +181,7 @@ def main():
                     f'cd {exe_path} && '
                     'sudo sh -c "echo 3 > /proc/sys/vm/drop_caches" && '
                     f'numactl --membind={numa_id} --cpunodebind={numa_id} '
-                    f'stdbuf -oL -eL env DEFT_DISABLE_HUGEPAGE=1 '
+                    f'stdbuf -oL -eL env {hp_env} '
                     f'./{g_cfg["server_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
                     f'--numa_id {numa_id} --rnic_id {rnic_id} > ../log/server_{i}.log 2>&1'
@@ -202,7 +206,7 @@ def main():
                 cmd = (
                     f'cd {exe_path} && '
                     f'numactl --membind={numa_id} --cpunodebind={numa_id} '
-                    f'stdbuf -oL -eL env DEFT_DISABLE_HUGEPAGE=1 '
+                    f'stdbuf -oL -eL env {hp_env} '
                     f'./{g_cfg["client_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
                     f'--numa_id {numa_id} --rnic_id {rnic_id} --num_prefill_threads {num_prefill_threads} '
