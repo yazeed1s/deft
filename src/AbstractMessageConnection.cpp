@@ -13,10 +13,21 @@ AbstractMessageConnection::AbstractMessageConnection(
   createQueuePair(&message, type, send_cq, cq, &ctx);
   modifyUDtoRTS(message, &ctx);
 
-  messagePool = hugePageAlloc(2 * messageNR * MESSAGE_SIZE);
-  messageMR =
-      createMemoryRegion((uint64_t)messagePool, 2 * messageNR * MESSAGE_SIZE,
-                         &ctx, IBV_ACCESS_LOCAL_WRITE, "message");
+  const uint64_t logical_size = 2ull * messageNR * MESSAGE_SIZE;
+  const uint64_t hugepage_size = 2ull * 1024 * 1024;
+  // Register a hugepage-aligned length so hugetlb-backed message pools can be
+  // pinned reliably on strict drivers.
+  const uint64_t mr_size =
+      ((logical_size + hugepage_size - 1) / hugepage_size) * hugepage_size;
+
+  messagePool = hugePageAlloc(mr_size);
+  // Fault in each hugepage before ibv_reg_mr.
+  for (uint64_t off = 0; off < mr_size; off += hugepage_size) {
+    *(volatile char *)((char *)messagePool + off) = 0;
+  }
+
+  messageMR = createMemoryRegion((uint64_t)messagePool, mr_size, &ctx,
+                                 IBV_ACCESS_LOCAL_WRITE, "message");
   sendPool = (char *)messagePool + messageNR * MESSAGE_SIZE;
   messageLkey = messageMR->lkey;
 }
