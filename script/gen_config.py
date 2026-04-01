@@ -63,10 +63,10 @@ def main():
     }
 
     for ip in mn_ips:
-        config['servers'].append({'ip': ip, 'numa_id': 0})
+        config['servers'].append({'ip': ip, 'numa_id': 1})
 
-    # single socket machines (like d6515) only have numa 0
-    for numa_id in [0]:
+    # Clemson r650 + mlx5_2 path runs on NUMA 1.
+    for numa_id in [1]:
         for ip in cn_ips:
             config['clients'].append({'ip': ip, 'numa_id': numa_id})
 
