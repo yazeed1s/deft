@@ -13,6 +13,8 @@ from ssh_connect import ssh_command
 
 MIN_SERVER_HUGEPAGES = 32768
 MIN_CLIENT_HUGEPAGES = 1024
+MIN_SERVER_HUGEPAGES_NUMA = 32768
+MIN_CLIENT_HUGEPAGES_NUMA_FORCE = 1536
 
 def dump_remote_log(ip, username, password, log_path, role, idx, lines=80):
     cmd = (
@@ -36,19 +38,28 @@ def dump_remote_log(ip, username, password, log_path, role, idx, lines=80):
     except Exception as e:
         print(f"failed to fetch {role} {idx} log from {ip}: {e}")
 
-def check_hugepages(g_cfg):
+def check_hugepages(g_cfg, force_hugepage=False):
     username = g_cfg['username']
     password = g_cfg['password']
     required_per_ip = {}
+    required_per_ip_numa = {}
     failed = False
 
     for node in g_cfg['servers']:
         ip = node['ip']
         required_per_ip[ip] = max(required_per_ip.get(ip, 0), MIN_SERVER_HUGEPAGES)
+        numa_id = int(node.get('numa_id', 0))
+        required_per_ip_numa[ip] = (numa_id, MIN_SERVER_HUGEPAGES_NUMA)
 
     for node in g_cfg['clients']:
         ip = node['ip']
         required_per_ip[ip] = max(required_per_ip.get(ip, 0), MIN_CLIENT_HUGEPAGES)
+        if force_hugepage:
+            numa_id = int(node.get('numa_id', 0))
+            prev = required_per_ip_numa.get(ip)
+            need = MIN_CLIENT_HUGEPAGES_NUMA_FORCE
+            if prev is None or need > prev[1]:
+                required_per_ip_numa[ip] = (numa_id, need)
 
     print("preflight: checking hugepages on all nodes...")
     for ip, min_hp in sorted(required_per_ip.items()):
@@ -75,6 +86,33 @@ def check_hugepages(g_cfg):
         if hp < min_hp:
             failed = True
 
+        if force_hugepage and ip in required_per_ip_numa:
+            numa_id, min_numa_hp = required_per_ip_numa[ip]
+            cmd_numa = (
+                "bash -lc '"
+                f"cat /sys/devices/system/node/node{numa_id}/hugepages/hugepages-2048kB/free_hugepages 2>/dev/null || echo -1'"
+            )
+            try:
+                ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd_numa)
+                out_numa = stdout.read().decode("utf-8", errors="replace").strip()
+                err_numa = stderr.read().decode("utf-8", errors="replace").strip()
+                ssh.close()
+            except Exception as e:
+                print(f"preflight error on {ip}: cannot query NUMA hugepages ({e})")
+                failed = True
+                continue
+
+            try:
+                hp_numa = int(out_numa.splitlines()[-1]) if out_numa else -1
+            except ValueError:
+                hp_numa = -1
+
+            print(f"  node {ip}: node{numa_id}.free_hugepages={hp_numa} (required >= {min_numa_hp})")
+            if err_numa:
+                print(f"  node {ip}: ssh stderr (numa): {err_numa}")
+            if hp_numa < min_numa_hp:
+                failed = True
+
     if failed:
         print("preflight failed: hugepages are insufficient on one or more nodes.")
         print("run: python3 ../script/all_hugepage.py")
@@ -92,6 +130,16 @@ def main():
     parser.add_argument("--small", action="store_true", help="run small benchmark")
     parser.add_argument("--mid", action="store_true", help="run medium benchmark")
     parser.add_argument("--big", action="store_true", help="run big benchmark")
+    parser.add_argument("--threads-per-client", type=int, default=None,
+                        help="override benchmark threads per client")
+    parser.add_argument("--key-space", type=int, default=None,
+                        help="override key space")
+    parser.add_argument("--read-ratio", type=int, default=None,
+                        help="override read ratio [0..100]")
+    parser.add_argument("--zipf", type=float, default=None,
+                        help="override zipf factor")
+    parser.add_argument("--prefill-threads", type=int, default=None,
+                        help="override prefill threads per client process")
     parser.add_argument("--force-hugepage", action="store_true",
                         help="set DEFT_FORCE_HUGEPAGE=1 instead of DEFT_DISABLE_HUGEPAGE=1")
     parser.add_argument("--name", type=str, default="", help="name for result file")
@@ -117,7 +165,7 @@ def main():
         sys.exit(1)
 
     print(f"topology: {num_servers} servers, {num_clients} clients")
-    if not check_hugepages(g_cfg):
+    if not check_hugepages(g_cfg, force_hugepage=args.force_hugepage):
         sys.exit(1)
 
     if args.smoke:
@@ -146,7 +194,8 @@ def main():
         read_ratio_arr = [50]
         zipf_arr = [0.99]
 
-    file_name = get_res_name("bench", args.name if not args.smoke else "smoke")
+    file_postfix = args.name if args.name else ("smoke" if args.smoke else "")
+    file_name = get_res_name("bench", file_postfix)
 
     exe_path = f'{g_cfg["src_path"]}/{g_cfg["app_rel_path"]}'
     username = g_cfg['username']
@@ -155,13 +204,25 @@ def main():
     rnic_id = int(g_cfg.get('rnic_id', 2))
     hp_env = "DEFT_FORCE_HUGEPAGE=1" if args.force_hugepage else "DEFT_DISABLE_HUGEPAGE=1"
     print(f"memory mode: {'force_hugepage' if args.force_hugepage else 'disable_hugepage'}")
+    had_any_error = False
 
     with open(file_name, 'w') as fp:
+        if args.threads_per_client is not None:
+            threads_CN_arr = [args.threads_per_client]
+        if args.key_space is not None:
+            key_space_arr = [args.key_space]
+        if args.read_ratio is not None:
+            read_ratio_arr = [args.read_ratio]
+        if args.zipf is not None:
+            zipf_arr = [args.zipf]
+
         product_list = list(product(key_space_arr, read_ratio_arr, zipf_arr, threads_CN_arr))
 
         for job_id, (key_space, read_ratio, zipf, num_threads) in enumerate(product_list):
             key_space = int(key_space)
             num_prefill_threads = num_threads if args.smoke else 30
+            if args.prefill_threads is not None:
+                num_prefill_threads = args.prefill_threads
 
             print(f'\nstarting job {job_id + 1}/{len(product_list)}: total_threads={num_threads * num_clients} clients={num_clients} threads_per_client={num_threads} key_space={key_space} read_ratio={read_ratio} zipf={zipf}')
             fp.write(f'total_threads: {num_threads * num_clients} num_servers: {num_servers} num_clients: {num_clients} num_threads: {num_threads} key_space: {key_space} read_ratio: {read_ratio} zipf: {zipf}\n')
@@ -253,6 +314,7 @@ def main():
                             finish = False
 
             if has_error:
+                had_any_error = True
                 print("error: killing processes")
                 for i in range(num_servers):
                     if server_stderrs[i].channel.recv_ready():
@@ -306,6 +368,8 @@ def main():
                 time.sleep(5)
 
     print(f"\ndone. saved to {file_name}")
+    if had_any_error:
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()

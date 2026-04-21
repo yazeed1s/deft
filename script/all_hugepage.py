@@ -7,27 +7,39 @@ with open('../script/global_config.yaml', 'r') as f:
     g_cfg = yaml.safe_load(f)
 
 SERVER_HUGEPAGES = 32768
-CLIENT_HUGEPAGES = 1024
+CLIENT_HUGEPAGES = 2048
 
 def all_hugepage():
-    ip_set = set()
     username = g_cfg['username']
     password = g_cfg['password']
+    nodes = {}
 
-    server_ips = {n['ip'] for n in g_cfg.get('servers', [])}
-    client_ips = {n['ip'] for n in g_cfg.get('clients', [])}
+    for n in g_cfg.get('servers', []):
+        ip = n['ip']
+        numa_id = int(n.get('numa_id', 0))
+        nodes[ip] = {'role': 'server', 'numa_id': numa_id, 'target': SERVER_HUGEPAGES}
 
-    for ip in sorted(server_ips | client_ips):
-        if ip in ip_set:
-            continue
-        ip_set.add(ip)
-        target = SERVER_HUGEPAGES if ip in server_ips else CLIENT_HUGEPAGES
-        print(f'hugepage {ip} -> {target}')
+    for n in g_cfg.get('clients', []):
+        ip = n['ip']
+        numa_id = int(n.get('numa_id', 0))
+        if ip not in nodes:
+            nodes[ip] = {'role': 'client', 'numa_id': numa_id, 'target': CLIENT_HUGEPAGES}
+
+    for ip in sorted(nodes.keys()):
+        role = nodes[ip]['role']
+        numa_id = nodes[ip]['numa_id']
+        target = nodes[ip]['target']
+        other_numa = 1 if numa_id == 0 else 0
+        print(f'hugepage {ip} role={role} numa={numa_id} target={target}')
         cmd = (
             f"bash -lc '"
-            f"sudo -n sysctl -w vm.nr_hugepages={target} "
+            f"echo {target} | sudo -n tee /sys/devices/system/node/node{numa_id}/hugepages/hugepages-2048kB/nr_hugepages >/dev/null "
+            f"&& echo 0 | sudo -n tee /sys/devices/system/node/node{other_numa}/hugepages/hugepages-2048kB/nr_hugepages >/dev/null "
+            f"&& sudo -n sysctl -w vm.nr_hugepages={target} >/dev/null "
             f"&& sudo -n sysctl -w kernel.watchdog_thresh=120 "
-            f"&& cat /proc/sys/vm/nr_hugepages'"
+            f"&& echo total=$(cat /proc/sys/vm/nr_hugepages) "
+            f"&& echo node{numa_id}=$(cat /sys/devices/system/node/node{numa_id}/hugepages/hugepages-2048kB/free_hugepages) "
+            f"&& echo node{other_numa}=$(cat /sys/devices/system/node/node{other_numa}/hugepages/hugepages-2048kB/free_hugepages)'"
         )
         try:
             ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
@@ -41,7 +53,7 @@ def all_hugepage():
         if err:
             print(f'  {ip} stderr: {err}')
         if out:
-            print(f'  {ip} now vm.nr_hugepages={out.splitlines()[-1]}')
+            print(f'  {ip} {out.replace(chr(10), " ")}')
         else:
             print(f'  {ip} no output from sysctl command')
 
