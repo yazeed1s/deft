@@ -6,24 +6,39 @@ from ssh_connect import ssh_command
 with open('../script/global_config.yaml', 'r') as f:
     g_cfg = yaml.safe_load(f)
 
-SERVER_HUGEPAGES = 32768
-CLIENT_HUGEPAGES = 2048
+SERVER_HUGEPAGE_FRACTION = 0.40
+CLIENT_HUGEPAGE_MIN = 1024
+
+def query_total_ram_pages(ip, username, password):
+    from ssh_connect import ssh_command
+    cmd = "bash -lc 'grep MemTotal /proc/meminfo | awk \"{print \\$2}\"'"
+    try:
+        ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
+        out = stdout.read().decode("utf-8", errors="replace").strip()
+        ssh.close()
+        return int(out.splitlines()[-1]) // 2048
+    except Exception:
+        return 16384  # fallback
 
 def all_hugepage():
     username = g_cfg['username']
     password = g_cfg['password']
     nodes = {}
+    ram_cache = {}
 
     for n in g_cfg.get('servers', []):
         ip = n['ip']
+        if ip not in ram_cache:
+            ram_cache[ip] = query_total_ram_pages(ip, username, password)
         numa_id = int(n.get('numa_id', 0))
-        nodes[ip] = {'role': 'server', 'numa_id': numa_id, 'target': SERVER_HUGEPAGES}
+        target = int(ram_cache[ip] * SERVER_HUGEPAGE_FRACTION)
+        nodes[ip] = {'role': 'server', 'numa_id': numa_id, 'target': target}
 
     for n in g_cfg.get('clients', []):
         ip = n['ip']
         numa_id = int(n.get('numa_id', 0))
         if ip not in nodes:
-            nodes[ip] = {'role': 'client', 'numa_id': numa_id, 'target': CLIENT_HUGEPAGES}
+            nodes[ip] = {'role': 'client', 'numa_id': numa_id, 'target': CLIENT_HUGEPAGE_MIN}
 
     for ip in sorted(nodes.keys()):
         role = nodes[ip]['role']

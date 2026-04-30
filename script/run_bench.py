@@ -11,10 +11,49 @@ from itertools import product
 from time import gmtime, strftime
 from ssh_connect import ssh_command
 
-MIN_SERVER_HUGEPAGES = 32768
-MIN_CLIENT_HUGEPAGES = 1024
-MIN_SERVER_HUGEPAGES_NUMA = 32768
-MIN_CLIENT_HUGEPAGES_NUMA_FORCE = 1536
+# Hugepage requirements as a fraction of physical RAM (2MB pages).
+SERVER_HUGEPAGE_FRACTION = 0.40   # 40% of total RAM
+CLIENT_HUGEPAGE_MIN = 1024        # ~2 GB fixed minimum for clients
+CLIENT_HUGEPAGE_NUMA_MIN = 1536   # ~3 GB when --force-hugepage
+
+def query_total_ram_pages(ip, username, password):
+    """Query total RAM on a node, return as number of 2MB hugepages."""
+    cmd = "bash -lc 'grep MemTotal /proc/meminfo | awk \"{print \\$2}\"'"
+    try:
+        ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
+        out = stdout.read().decode("utf-8", errors="replace").strip()
+        ssh.close()
+        mem_kb = int(out.splitlines()[-1])
+        return mem_kb // 2048  # convert KB to 2MB pages
+    except Exception:
+        return 16384  # fallback: assume 32GB
+
+def get_hugepage_requirements(g_cfg):
+    """Compute per-node hugepage requirements based on actual hardware."""
+    username = g_cfg['username']
+    password = g_cfg['password']
+    ram_cache = {}
+
+    for node in g_cfg.get('servers', []):
+        ip = node['ip']
+        if ip not in ram_cache:
+            ram_cache[ip] = query_total_ram_pages(ip, username, password)
+
+    for node in g_cfg.get('clients', []):
+        ip = node['ip']
+        if ip not in ram_cache:
+            ram_cache[ip] = query_total_ram_pages(ip, username, password)
+
+    server_ips = {n['ip'] for n in g_cfg.get('servers', [])}
+    requirements = {}
+    for ip, total_pages in ram_cache.items():
+        if ip in server_ips:
+            req = int(total_pages * SERVER_HUGEPAGE_FRACTION)
+        else:
+            req = CLIENT_HUGEPAGE_MIN
+        requirements[ip] = req
+
+    return requirements
 
 def dump_remote_log(ip, username, password, log_path, role, idx, lines=80):
     cmd = (
@@ -41,23 +80,25 @@ def dump_remote_log(ip, username, password, log_path, role, idx, lines=80):
 def check_hugepages(g_cfg, force_hugepage=False):
     username = g_cfg['username']
     password = g_cfg['password']
+    failed = False
+
+    dynamic_reqs = get_hugepage_requirements(g_cfg)
     required_per_ip = {}
     required_per_ip_numa = {}
-    failed = False
 
     for node in g_cfg['servers']:
         ip = node['ip']
-        required_per_ip[ip] = max(required_per_ip.get(ip, 0), MIN_SERVER_HUGEPAGES)
+        required_per_ip[ip] = dynamic_reqs.get(ip, CLIENT_HUGEPAGE_MIN)
         numa_id = int(node.get('numa_id', 0))
-        required_per_ip_numa[ip] = (numa_id, MIN_SERVER_HUGEPAGES_NUMA)
+        required_per_ip_numa[ip] = (numa_id, dynamic_reqs.get(ip, CLIENT_HUGEPAGE_MIN))
 
     for node in g_cfg['clients']:
         ip = node['ip']
-        required_per_ip[ip] = max(required_per_ip.get(ip, 0), MIN_CLIENT_HUGEPAGES)
+        required_per_ip[ip] = max(required_per_ip.get(ip, 0), dynamic_reqs.get(ip, CLIENT_HUGEPAGE_MIN))
         if force_hugepage:
             numa_id = int(node.get('numa_id', 0))
             prev = required_per_ip_numa.get(ip)
-            need = MIN_CLIENT_HUGEPAGES_NUMA_FORCE
+            need = CLIENT_HUGEPAGE_NUMA_MIN
             if prev is None or need > prev[1]:
                 required_per_ip_numa[ip] = (numa_id, need)
 
