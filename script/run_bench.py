@@ -282,7 +282,7 @@ def main():
                 cmd = (
                     f'cd {exe_path} && '
                     'sudo sh -c "echo 3 > /proc/sys/vm/drop_caches" && '
-                    f'ulimit -l unlimited && numactl --membind={numa_id} --cpunodebind={numa_id} '
+                    f'sudo numactl --membind={numa_id} --cpunodebind={numa_id} '
                     f'stdbuf -oL -eL env {hp_env} '
                     f'./{g_cfg["server_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
@@ -307,7 +307,7 @@ def main():
                 print(f'start client {i} on {ip} (numa {numa_id})')
                 cmd = (
                     f'cd {exe_path} && '
-                    f'ulimit -l unlimited && numactl --membind={numa_id} --cpunodebind={numa_id} '
+                    f'sudo numactl --membind={numa_id} --cpunodebind={numa_id} '
                     f'stdbuf -oL -eL env {hp_env} '
                     f'./{g_cfg["client_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
