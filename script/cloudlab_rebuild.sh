@@ -51,9 +51,9 @@ sudo mkdir -p "$DEFT_ROOT"
 sudo chown "$REAL_USER:$REAL_GROUP" /deft_code "$DEFT_ROOT"
 
 if [[ -d /local/repository/.git ]]; then
-  sudo rsync -a --delete --exclude build /local/repository/ "$DEFT_ROOT"/
+  sudo rsync -a --delete --exclude build --exclude build_cxl /local/repository/ "$DEFT_ROOT"/
 elif [[ -f CMakeLists.txt ]]; then
-  sudo rsync -a --delete --exclude build ./ "$DEFT_ROOT"/
+  sudo rsync -a --delete --exclude build --exclude build_cxl ./ "$DEFT_ROOT"/
 else
   echo "error: cannot find repo source. expected /local/repository or current repo root."
   exit 1
@@ -71,12 +71,12 @@ if ! ldconfig -p | grep -q libcityhash; then
   cd cityhash
   autoreconf -if
   ./configure
-  make -j"$(nproc)"
+  make -j16
   sudo make install
   sudo ldconfig
 fi
 
-echo "[3/3] building deft..."
+echo "[3/4] building deft (RDMA mode)..."
 if command -v gcc-10 >/dev/null 2>&1 && command -v g++-10 >/dev/null 2>&1; then
   export CC="$(command -v gcc-10)"
   export CXX="$(command -v g++-10)"
@@ -91,8 +91,18 @@ echo "using CXX=${CXX}"
 rm -f CMakeCache.txt
 rm -rf CMakeFiles
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" ..
-make -j"$(nproc)"
+make -j16
 test -x ./server
 test -x ./client
 
-echo "done. sync + cityhash + build completed."
+echo "[4/4] building deft (CXL mode)..."
+mkdir -p "$DEFT_ROOT/build_cxl"
+cd "$DEFT_ROOT/build_cxl"
+rm -f CMakeCache.txt
+rm -rf CMakeFiles
+cmake -DUSE_CXL=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" ..
+make -j16
+test -x ./server
+test -x ./client
+
+echo "done. sync + cityhash + build (RDMA & CXL) completed."

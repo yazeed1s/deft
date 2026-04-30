@@ -273,7 +273,7 @@ if ! ldconfig -p | grep -q libcityhash; then
     cd cityhash
     autoreconf -if
     ./configure
-    make -j"$(nproc)"
+    make -j16
     sudo make install
     sudo ldconfig
 fi
@@ -294,7 +294,7 @@ echo "using CXX=${CXX}"
 rm -f CMakeCache.txt
 rm -rf CMakeFiles
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" ..
-make -j"$(nproc)"
+make -j16
 test -x ./server
 test -x ./client
 

@@ -26,7 +26,7 @@ cmake .. \
     -DCMAKE_C_COMPILER="${CC}" \
     -DCMAKE_CXX_COMPILER="${CXX}"
 
-make -j"$(nproc)"
+make -j16
 
 echo "done. CXL binaries:"
 ls -la server client client_non_stop 2>/dev/null || true
