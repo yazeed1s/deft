@@ -13,7 +13,7 @@ from ssh_connect import ssh_command
 
 # Hugepage requirements as a fraction of physical RAM (2MB pages).
 SERVER_HUGEPAGE_FRACTION = 0.40   # 40% of total RAM
-CLIENT_HUGEPAGE_MIN = 1024        # ~2 GB fixed minimum for clients
+CLIENT_HUGEPAGE_MIN = 2048        # ~4 GB fixed minimum for clients
 CLIENT_HUGEPAGE_NUMA_MIN = 1536   # ~3 GB when --force-hugepage
 
 def query_total_ram_pages(ip, username, password):

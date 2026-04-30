@@ -7,7 +7,7 @@ with open('../script/global_config.yaml', 'r') as f:
     g_cfg = yaml.safe_load(f)
 
 SERVER_HUGEPAGE_FRACTION = 0.40
-CLIENT_HUGEPAGE_MIN = 1024
+CLIENT_HUGEPAGE_MIN = 2048
 
 def query_total_ram_pages(ip, username, password):
     from ssh_connect import ssh_command
