@@ -71,7 +71,7 @@ if ! ldconfig -p | grep -q libcityhash; then
   cd cityhash
   autoreconf -if
   ./configure
-  make -j16
+  make -j4
   sudo make install
   sudo ldconfig
 fi
@@ -91,7 +91,7 @@ echo "using CXX=${CXX}"
 rm -f CMakeCache.txt
 rm -rf CMakeFiles
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" ..
-make -j16
+make -j4
 test -x ./server
 test -x ./client
 
@@ -101,7 +101,7 @@ cd "$DEFT_ROOT/build_cxl"
 rm -f CMakeCache.txt
 rm -rf CMakeFiles
 cmake -DUSE_CXL=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" ..
-make -j16
+make -j4
 test -x ./server
 test -x ./client
 
