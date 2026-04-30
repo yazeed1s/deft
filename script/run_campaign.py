@@ -52,15 +52,29 @@ def run_one(script_dir, mode, rr, zf, repeat_id, force_hugepage, run_name):
         cmd.append("--force-hugepage")
 
     t0 = time.time()
-    proc = subprocess.run(
+    proc = subprocess.Popen(
         cmd,
         cwd=script_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         universal_newlines=True,
+        bufsize=1,
     )
+    
+    out_lines = []
+    for line in proc.stdout:
+        print(line, end="")
+        out_lines.append(line)
+        
+    proc.wait()
     dt = time.time() - t0
-    out = proc.stdout or ""
+    out = "".join(out_lines)
+    
+    # We still need a dummy object to mimic proc.returncode
+    class DummyProc: pass
+    dummy_proc = DummyProc()
+    dummy_proc.returncode = proc.returncode
+    proc = dummy_proc
 
     m_load = LINE_LOAD.search(out)
     m_final = LINE_FINAL.search(out)
