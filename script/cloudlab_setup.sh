@@ -264,6 +264,16 @@ fi
 sudo chown -R "$REAL_USER:$REAL_GROUP" "$DEFT_ROOT"
 cd "$DEFT_ROOT"
 
+# Calculate safe make jobs based on available memory (~2GB per job)
+AVAIL_MEM_KB=$(awk '/MemAvailable/ {print $2}' /proc/meminfo || echo 0)
+if [[ "$AVAIL_MEM_KB" -eq 0 ]]; then
+    AVAIL_MEM_KB=$(awk '/MemFree/ {print $2}' /proc/meminfo || echo 2048000)
+fi
+MAKE_JOBS=$(( AVAIL_MEM_KB / 1024 / 1024 / 2 ))
+[[ $MAKE_JOBS -lt 1 ]] && MAKE_JOBS=1
+MAX_CORES=$(nproc)
+[[ $MAKE_JOBS -gt $MAX_CORES ]] && MAKE_JOBS=$MAX_CORES
+
 echo "[4/6] ensuring cityhash..."
 if ! ldconfig -p | grep -q libcityhash; then
     cd /tmp
@@ -273,7 +283,7 @@ if ! ldconfig -p | grep -q libcityhash; then
     cd cityhash
     autoreconf -if
     ./configure
-    make -j4
+    make -j"${MAKE_JOBS}"
     sudo make install
     sudo ldconfig
 fi
@@ -290,11 +300,12 @@ mkdir -p "$DEFT_ROOT/build"
 cd "$DEFT_ROOT/build"
 echo "using CC=${CC}"
 echo "using CXX=${CXX}"
+echo "using make -j${MAKE_JOBS} based on available RAM"
 # CMake caches compiler choice in CMakeCache.txt; clear it so upgrades are picked up.
 rm -f CMakeCache.txt
 rm -rf CMakeFiles
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" ..
-make -j4
+make -j"${MAKE_JOBS}"
 test -x ./server
 test -x ./client
 
