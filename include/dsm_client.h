@@ -6,24 +6,24 @@
 #include "Config.h"
 #include "GlobalAddress.h"
 #include "LocalAllocator.h"
+#include "RawMessageConnection.h" // RawMessage, RpcType (transport-agnostic)
 #include "RdmaBuffer.h"
-#include "RawMessageConnection.h"   // RawMessage, RpcType (transport-agnostic)
 
 #ifdef USE_RDMA
+#include "ThreadConnection.h"
 #include "connection.h"
 #include "dsm_keeper.h"
-#include "ThreadConnection.h"
 #endif
 
 #ifdef USE_CXL
 #include "CxlTransport.h"
-#include "dsm_keeper.h"   // for Keeper base class (memcached)
+#include "dsm_keeper.h" // for Keeper base class (memcached)
 #endif
 
 class Directory;
 
 class DSMClient {
- public:
+public:
   static DSMClient *GetInstance(const DSMConfig &conf) {
     static DSMClient dsm(conf);
     return &dsm;
@@ -169,7 +169,7 @@ class DSMClient {
   void RpcCallDir(const RawMessage &m, uint16_t node_id, uint16_t dir_id = 0);
   RawMessage *RpcWait();
 
- private:
+private:
   DSMConfig conf_;
   std::atomic_int app_id_;
   Cache cache_;
@@ -181,9 +181,8 @@ class DSMClient {
   static thread_local RdmaBuffer rbuf_[define::kMaxCoro];
   static thread_local uint64_t thread_tag_;
 
-  Keeper *keeper_;
-
 #ifdef USE_RDMA
+  DSMClientKeeper *keeper_;
   static thread_local ThreadConnection *i_con_;
   RemoteConnectionToServer *conn_to_server_;
   ThreadConnection *th_con_[MAX_APP_THREAD];
@@ -194,6 +193,7 @@ class DSMClient {
 #endif
 
 #ifdef USE_CXL
+  Keeper *keeper_;
   cxl::SharedRegion dsm_region_;
   cxl::SharedRegion lock_region_;
   cxl::SharedRegion rpc_region_;
