@@ -13,22 +13,18 @@ def resolve_ip(hostname):
         return None
 
 def detect_rnic_id():
-    # Prefer the RNIC carrying the experiment LAN (10.10.1.x) in show_gids output.
+    import glob
     try:
-        out = subprocess.check_output(["show_gids"], stderr=subprocess.STDOUT, text=True)
-        for line in out.splitlines():
-            if "10.10.1." in line:
-                m = re.search(r"(mlx5_(\d+))", line)
-                if m:
-                    return int(m.group(2))
-                # Newer stacks can expose names like rocep202s0f0/rocep202s0f1.
-                m = re.search(r"f(\d+)\b", line)
-                if m:
-                    return int(m.group(1))
+        devices = sorted([os.path.basename(d) for d in glob.glob("/sys/class/infiniband/*")])
+        if not devices:
+            return 0
+        # If there's an mlx5_2, use its index
+        for i, dev in enumerate(devices):
+            if dev == "mlx5_2":
+                return i
+        return 0 # Default to the first device (e.g. mlx4_0)
     except Exception:
-        pass
-    # CloudLab r650 commonly uses mlx5_2 for experiment VLAN.
-    return 2
+        return 0
 
 def main():
     username = getpass.getuser()
