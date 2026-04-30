@@ -1,6 +1,8 @@
 #ifndef __DIRECTORYCONNECTION_H__
 #define __DIRECTORYCONNECTION_H__
 
+#ifdef USE_RDMA
+
 #include "Common.h"
 #include "RawMessageConnection.h"
 
@@ -36,4 +38,7 @@ struct DirectoryConnection {
   void sendMessage2App(RawMessage *m, uint16_t node_id, uint16_t th_id);
 };
 
+#endif  // USE_RDMA
+
 #endif /* __DIRECTORYCONNECTION_H__ */
+

@@ -1,0 +1,7 @@
+/home/yaz/_dev/deft/build_cxl/CMakeFiles/deft.dir
+/home/yaz/_dev/deft/build_cxl/CMakeFiles/client.dir
+/home/yaz/_dev/deft/build_cxl/CMakeFiles/client_non_stop.dir
+/home/yaz/_dev/deft/build_cxl/CMakeFiles/server.dir
+/home/yaz/_dev/deft/build_cxl/CMakeFiles/skiplist_test.dir
+/home/yaz/_dev/deft/build_cxl/CMakeFiles/edit_cache.dir
+/home/yaz/_dev/deft/build_cxl/CMakeFiles/rebuild_cache.dir

@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/yaz/_dev/deft/build_cxl/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

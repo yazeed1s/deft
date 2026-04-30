@@ -1,6 +1,8 @@
 #ifndef __ABSTRACTMESSAGECONNECTION_H__
 #define __ABSTRACTMESSAGECONNECTION_H__
 
+#ifdef USE_RDMA
+
 #include "Common.h"
 
 #define SIGNAL_BATCH 31
@@ -50,4 +52,7 @@ public:
   uint32_t getQPN() { return message->qp_num; }
 };
 
+#endif  // USE_RDMA
+
 #endif /* __ABSTRACTMESSAGECONNECTION_H__ */
+

@@ -1,3 +1,5 @@
+#ifdef USE_RDMA
+
 #include "AbstractMessageConnection.h"
 
 AbstractMessageConnection::AbstractMessageConnection(
@@ -91,3 +93,5 @@ char *AbstractMessageConnection::getSendPool() {
 
   return s;
 }
+
+#endif  // USE_RDMA

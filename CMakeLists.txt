@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
 project(Deft)
 
+# Transport backend selection
+option(USE_CXL "Build with simulated CXL backend instead of RDMA" OFF)
+
 # disable boost warning
 add_definitions(-DBOOST_COROUTINES_NO_DEPRECATION_WARNING)
 
@@ -18,8 +21,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 add_compile_options(-Wall -Wno-deprecated-declarations -Wsign-compare)
 
-# Link Options
-set(LINKS_FLAGS "-lcityhash -lboost_system -lboost_coroutine -lpthread -libverbs -lmemcached -lgflags")
+# Link Options — transport-dependent
+if(USE_CXL)
+  add_definitions(-DUSE_CXL)
+  set(LINKS_FLAGS "-lcityhash -lboost_coroutine -lpthread -lmemcached -lgflags -lrt")
+else()
+  add_definitions(-DUSE_RDMA)
+  set(LINKS_FLAGS "-lcityhash -lboost_coroutine -lpthread -libverbs -lmemcached -lgflags")
+endif()
 
 set(INCLUDE_BASE ${PROJECT_SOURCE_DIR}/include)
 include_directories(${INCLUDE_BASE})
@@ -29,6 +38,14 @@ set(COMMON_SRC ${PROJECT_SOURCE_DIR}/src)
 
 #Used by both server and clients
 file(GLOB_RECURSE COMMON_FILE ${COMMON_SRC}/*.cpp)
+
+# Exclude transport-specific sources that don't apply
+if(USE_CXL)
+  list(FILTER COMMON_FILE EXCLUDE REGEX ".*/rdma/.*\\.cpp$")
+else()
+  list(FILTER COMMON_FILE EXCLUDE REGEX ".*/cxl/.*\\.cpp$")
+endif()
+
 add_library(deft STATIC ${COMMON_FILE})
 link_libraries(deft)
 

@@ -1,0 +1,1 @@
+/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/client.dir/link.d CMakeFiles/client.dir/test/client.cpp.o -o client  libdeft.a -lcityhash -lboost_coroutine -lpthread -lmemcached -lgflags -lrt

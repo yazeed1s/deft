@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Common.h"
+
+#ifdef USE_RDMA
 // #include "RawMessageConnection.h"
 
 struct RemoteConnectionToClient {
@@ -19,3 +21,11 @@ struct RemoteConnectionToServer {
   uint64_t lock_base;
   uint32_t lock_rkey[NR_DIRECTORY];
 };
+
+#else  // USE_CXL
+
+// Stub connection structs — not used under CXL
+struct RemoteConnectionToClient {};
+struct RemoteConnectionToServer {};
+
+#endif  // USE_RDMA

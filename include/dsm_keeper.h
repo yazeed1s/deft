@@ -1,7 +1,6 @@
 #pragma once
 
 #include <assert.h>
-#include <infiniband/verbs.h>
 #include <libmemcached/memcached.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -15,11 +14,15 @@
 
 #include "Config.h"
 #include "Debug.h"
+
+#ifdef USE_RDMA
+#include <infiniband/verbs.h>
 #include "Rdma.h"
 #include "connection.h"
+#endif
 
 class Keeper {
- protected:
+ public:
   memcached_st *memc;
   static constexpr char SERVER_NUM_KEY[] = "ServerNum";
   static constexpr char CLIENT_NUM_KEY[] = "ClientNum";
@@ -73,6 +76,8 @@ class Keeper {
     return ret;
   }
 };
+
+#ifdef USE_RDMA
 
 struct ExPerThread {
   uint16_t lid;
@@ -160,3 +165,5 @@ class DSMClientKeeper : public Keeper {
   void ConnectServers();
   void ConnectServer(uint16_t server_id);
 };
+
+#endif  // USE_RDMA

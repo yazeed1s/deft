@@ -1,3 +1,5 @@
+#ifdef USE_RDMA
+
 #include "DirectoryConnection.h"
 
 #include "HugePageAlloc.h"
@@ -88,3 +90,5 @@ void DirectoryConnection::sendMessage2App(RawMessage *m, uint16_t node_id,
   message->sendRawMessage(m, remote_con_[node_id].app_message_qpn[th_id],
                           remote_con_[node_id].dir_to_app_ah[dirID][th_id]);
 }
+
+#endif  // USE_RDMA

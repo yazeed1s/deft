@@ -1,10 +1,13 @@
 #ifndef __RAWMESSAGECONNECTION_H__
 #define __RAWMESSAGECONNECTION_H__
 
-#include "AbstractMessageConnection.h"
 #include "GlobalAddress.h"
 
+#include <cstdint>
 #include <thread>
+
+// ----- Transport-agnostic message types -----
+// These are used by both RDMA and CXL paths (Directory, DSMClient, etc.)
 
 enum RpcType : uint8_t {
   MALLOC,
@@ -24,6 +27,11 @@ struct RawMessage {
   int level;
 } __attribute__((packed));
 
+// ----- RDMA-specific message connection class -----
+#ifdef USE_RDMA
+
+#include "AbstractMessageConnection.h"
+
 class RawMessageConnection : public AbstractMessageConnection {
 
 public:
@@ -32,5 +40,7 @@ public:
   void initSend();
   void sendRawMessage(RawMessage *m, uint32_t remoteQPN, ibv_ah *ah);
 };
+
+#endif  // USE_RDMA
 
 #endif /* __RAWMESSAGECONNECTION_H__ */

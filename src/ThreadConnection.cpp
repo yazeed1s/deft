@@ -1,3 +1,5 @@
+#ifdef USE_RDMA
+
 #include "ThreadConnection.h"
 
 #include "connection.h"
@@ -61,3 +63,5 @@ void ThreadConnection::sendMessage2Dir(RawMessage *m, uint16_t node_id,
       m, conn_to_server[node_id].dir_message_qpn[dir_id],
       conn_to_server[node_id].app_to_dir_ah[threadID][dir_id]);
 }
+
+#endif  // USE_RDMA

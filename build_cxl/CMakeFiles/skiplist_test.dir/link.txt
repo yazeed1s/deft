@@ -1,0 +1,1 @@
+/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/skiplist_test.dir/link.d CMakeFiles/skiplist_test.dir/test/skiplist_test.cpp.o -o skiplist_test  libdeft.a -lcityhash -lboost_coroutine -lpthread -lmemcached -lgflags -lrt

@@ -12,7 +12,26 @@
 
 #include "Debug.h"
 #include "HugePageAlloc.h"
+
+#ifdef USE_RDMA
 #include "Rdma.h"
+#else
+// Minimal compatibility definitions for CXL mode.
+// RdmaOpRegion is used in DSMClient's batch operation API;
+// under CXL it only needs source, dest, size, and is_on_chip.
+#define forceinline inline __attribute__((always_inline))
+
+constexpr int kOroMax = 3;
+struct RdmaOpRegion {
+  uint64_t source;
+  uint64_t dest;
+  union {
+    uint64_t size;
+    uint64_t log_sz;  // used for extended atomic
+  };
+  bool is_on_chip = false;
+};
+#endif  // USE_RDMA
 
 #include "WRLock.h"
 

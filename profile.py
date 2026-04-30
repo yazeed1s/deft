@@ -3,7 +3,7 @@ import geni.rspec.pg as pg
 
 pc = portal.Context()
 
-# Parameters
+
 pc.defineParameter("mn_count", "Memory Nodes", portal.ParameterType.INTEGER, 1)
 pc.defineParameter("cn_count", "Compute Nodes", portal.ParameterType.INTEGER, 5)
 pc.defineParameter("node_type", "Hardware Type", portal.ParameterType.STRING, "r650")

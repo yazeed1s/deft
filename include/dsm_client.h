@@ -2,15 +2,23 @@
 
 #include <atomic>
 
-// #include "Config.h"
 #include "Cache.h"
-#include "connection.h"
-#include "dsm_keeper.h"
+#include "Config.h"
 #include "GlobalAddress.h"
 #include "LocalAllocator.h"
 #include "RdmaBuffer.h"
-#include "RawMessageConnection.h"
+#include "RawMessageConnection.h"   // RawMessage, RpcType (transport-agnostic)
+
+#ifdef USE_RDMA
+#include "connection.h"
+#include "dsm_keeper.h"
 #include "ThreadConnection.h"
+#endif
+
+#ifdef USE_CXL
+#include "CxlTransport.h"
+#include "dsm_keeper.h"   // for Keeper base class (memcached)
+#endif
 
 class Directory;
 
@@ -155,46 +163,11 @@ class DSMClient {
                         my_client_id_, conf_.num_client);
   }
 
-  GlobalAddress Alloc(size_t size) {
-    thread_local int next_target_node =
-        (get_my_thread_id() + get_my_client_id()) % conf_.num_server;
-    thread_local int next_target_dir_id =
-        (get_my_thread_id() + get_my_client_id()) % NR_DIRECTORY;
-
-    bool need_chunk = false;
-    auto addr = local_allocator_.malloc(size, need_chunk);
-    if (need_chunk) {
-      RawMessage m;
-      m.type = RpcType::MALLOC;
-      this->RpcCallDir(m, next_target_node, next_target_dir_id);
-      local_allocator_.set_chunck(RpcWait()->addr);
-
-      if (++next_target_dir_id == NR_DIRECTORY) {
-        next_target_node = (next_target_node + 1) % conf_.num_server;
-        next_target_dir_id = 0;
-      }
-
-      // retry
-      addr = local_allocator_.malloc(size, need_chunk);
-    }
-
-    return addr;
-  }
-
+  GlobalAddress Alloc(size_t size);
   void Free(GlobalAddress addr) { local_allocator_.free(addr); }
 
-  void RpcCallDir(const RawMessage &m, uint16_t node_id, uint16_t dir_id = 0) {
-    auto buffer = (RawMessage *)i_con_->message->getSendPool();
-    memcpy(reinterpret_cast<void *>(buffer), &m, sizeof(RawMessage));
-    buffer->node_id = my_client_id_;
-    buffer->app_id = thread_id_;
-    i_con_->sendMessage2Dir(buffer, node_id, dir_id);
-  }
-  RawMessage *RpcWait() {
-    ibv_wc wc;
-    pollWithCQ(i_con_->rpc_cq, 1, &wc);
-    return (RawMessage *)i_con_->message->getMessage();
-  }
+  void RpcCallDir(const RawMessage &m, uint16_t node_id, uint16_t dir_id = 0);
+  RawMessage *RpcWait();
 
  private:
   DSMConfig conf_;
@@ -203,23 +176,35 @@ class DSMClient {
   uint32_t my_client_id_;
 
   static thread_local int thread_id_;
-  static thread_local ThreadConnection *i_con_;
   static thread_local char *rdma_buffer_;
   static thread_local LocalAllocator local_allocator_;
   static thread_local RdmaBuffer rbuf_[define::kMaxCoro];
   static thread_local uint64_t thread_tag_;
 
-  RemoteConnectionToServer *conn_to_server_;
+  Keeper *keeper_;
 
+#ifdef USE_RDMA
+  static thread_local ThreadConnection *i_con_;
+  RemoteConnectionToServer *conn_to_server_;
   ThreadConnection *th_con_[MAX_APP_THREAD];
-  DSMClientKeeper *keeper_;
   Directory *dir_agent_[NR_DIRECTORY];
 
-  DSMClient(const DSMConfig &conf);
-  
   void InitRdmaConnection();
   void FillKeysDest(RdmaOpRegion &ror, GlobalAddress addr, bool is_chip);
+#endif
 
+#ifdef USE_CXL
+  cxl::SharedRegion dsm_region_;
+  cxl::SharedRegion lock_region_;
+  cxl::SharedRegion rpc_region_;
+
+  void InitCxlConnection();
+  void *ResolveAddr(GlobalAddress gaddr);
+  void *ResolveLockAddr(GlobalAddress gaddr);
+
+  // Temporary buffer for RPC replies
+  static thread_local RawMessage rpc_reply_buf_;
+#endif
+
+  DSMClient(const DSMConfig &conf);
 };
-
-

@@ -1,6 +1,8 @@
 #ifndef __DIRECTORY_H__
 #define __DIRECTORY_H__
 
+#ifdef USE_RDMA
+
 #include <thread>
 #include <unordered_map>
 #include <atomic>
@@ -37,5 +39,7 @@ class Directory {
 
   void process_message(const RawMessage *m);
 };
+
+#endif  // USE_RDMA
 
 #endif /* __DIRECTORY_H__ */

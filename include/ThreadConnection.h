@@ -1,6 +1,8 @@
 #ifndef __THREADCONNECTION_H__
 #define __THREADCONNECTION_H__
 
+#ifdef USE_RDMA
+
 #include "Common.h"
 #include "RawMessageConnection.h"
 
@@ -31,4 +33,7 @@ struct ThreadConnection {
   void sendMessage2Dir(RawMessage *m, uint16_t node_id, uint16_t dir_id = 0);
 };
 
+#endif  // USE_RDMA
+
 #endif /* __THREADCONNECTION_H__ */
+

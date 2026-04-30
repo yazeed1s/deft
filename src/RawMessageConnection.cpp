@@ -1,3 +1,5 @@
+#ifdef USE_RDMA
+
 #include "RawMessageConnection.h"
 
 #include <cassert>
@@ -21,3 +23,5 @@ void RawMessageConnection::sendRawMessage(RawMessage *m, uint32_t remoteQPN,
 
   ++sendCounter;
 }
+
+#endif  // USE_RDMA

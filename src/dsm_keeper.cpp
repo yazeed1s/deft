@@ -3,8 +3,11 @@
 #include <fstream>
 #include <iostream>
 #include <random>
+
+#ifdef USE_RDMA
 #include "DirectoryConnection.h"
 #include "ThreadConnection.h"
+#endif
 
 std::string Trim(const std::string &s) {
   std::string res = s;
@@ -100,6 +103,9 @@ uint64_t Keeper::MemcFetchAndAdd(const char *key, uint32_t klen) {
   }
 }
 
+
+
+#ifdef USE_RDMA
 
 // DSMServerKeeper
 
@@ -314,3 +320,5 @@ void DSMClientKeeper::ConnectServer(uint16_t server_id) {
 
   free(s2c_meta);
 }
+
+#endif  // USE_RDMA

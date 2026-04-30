@@ -1,12 +1,18 @@
-#include "Directory.h"
+// Transport-agnostic globals used by Tree.cpp
 #include "Common.h"
-
-#include "connection.h"
-#include "DirectoryConnection.h"
+#include "GlobalAddress.h"
+#include "RawMessageConnection.h"
 
 GlobalAddress g_root_ptr = GlobalAddress::Null();
 int g_root_level = -1;
 bool enable_cache = true;
+
+#ifdef USE_RDMA
+
+#include "Directory.h"
+
+#include "connection.h"
+#include "DirectoryConnection.h"
 
 Directory::Directory(DirectoryConnection *dCon, uint16_t dirID, uint16_t nodeID)
     : dCon(dCon), dirID(dirID), nodeID(nodeID), dirTh(nullptr) {
@@ -93,3 +99,5 @@ void Directory::process_message(const RawMessage *m) {
     dCon->sendMessage2App(send, m->node_id, m->app_id);
   }
 }
+
+#endif  // USE_RDMA
