@@ -673,6 +673,47 @@ bool DSMClient::PollRdmaCqOnce(uint64_t &wr_id) {
   return res == 1;
 }
 
+GlobalAddress DSMClient::Alloc(size_t size) {
+  thread_local int next_target_node =
+      (get_my_thread_id() + get_my_client_id()) % conf_.num_server;
+  thread_local int next_target_dir_id =
+      (get_my_thread_id() + get_my_client_id()) % NR_DIRECTORY;
+
+  bool need_chunk = false;
+  auto addr = local_allocator_.malloc(size, need_chunk);
+  if (need_chunk) {
+    RawMessage m;
+    m.type = RpcType::MALLOC;
+    this->RpcCallDir(m, next_target_node, next_target_dir_id);
+    local_allocator_.set_chunck(RpcWait()->addr);
+
+    if (++next_target_dir_id == NR_DIRECTORY) {
+      next_target_node = (next_target_node + 1) % conf_.num_server;
+      next_target_dir_id = 0;
+    }
+
+    // retry
+    addr = local_allocator_.malloc(size, need_chunk);
+  }
+
+  return addr;
+}
+
+void DSMClient::RpcCallDir(const RawMessage &m, uint16_t node_id,
+                           uint16_t dir_id) {
+  auto buffer = (RawMessage *)i_con_->message->getSendPool();
+  memcpy(reinterpret_cast<void *>(buffer), &m, sizeof(RawMessage));
+  buffer->node_id = my_client_id_;
+  buffer->app_id = thread_id_;
+  i_con_->sendMessage2Dir(buffer, node_id, dir_id);
+}
+
+RawMessage *DSMClient::RpcWait() {
+  ibv_wc wc;
+  pollWithCQ(i_con_->rpc_cq, 1, &wc);
+  return (RawMessage *)i_con_->message->getMessage();
+}
+
 #endif  // USE_RDMA
 
 // =========================================================================
