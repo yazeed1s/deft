@@ -179,12 +179,14 @@ ensure_ofed49_userspace() {
 deb [trusted=yes] ${repo_base}/MLNX_LIBS ./
 OFEDAPT
 
-    # Avoid Ubuntu/MLNX mixed RDMA stacks.
-    sudo apt-get purge -y rdma-core ibverbs-providers || true
+    # Avoid Ubuntu/MLNX mixed RDMA stacks while preserving ibverbs providers,
+    # which are required by libfabric/libucx on CloudLab images.
+    sudo apt-get purge -y rdma-core || true
     sudo apt-get -f install -y || true
 
     retry 3 10 sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q
     retry 3 10 sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
+        ibverbs-providers \
         libibverbs1 libibverbs-dev ibverbs-utils \
         libmlx5-1 libmlx5-dev \
         librdmacm1 librdmacm-dev \
