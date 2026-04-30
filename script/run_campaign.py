@@ -57,7 +57,7 @@ def run_one(script_dir, mode, rr, zf, repeat_id, force_hugepage, run_name):
         cwd=script_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
+        universal_newlines=True,
     )
     dt = time.time() - t0
     out = proc.stdout or ""
