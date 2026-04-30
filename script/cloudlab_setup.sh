@@ -351,6 +351,36 @@ for node in "${CLUSTER_NODES[@]}"; do
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+# Install runtime shared libraries needed by deft binaries
+RUNTIME_PKGS=(libgflags-dev libnuma-dev libmemcached-dev libboost-all-dev)
+MISSING=()
+for p in "${RUNTIME_PKGS[@]}"; do
+    if ! dpkg -s "$p" >/dev/null 2>&1; then
+        MISSING+=("$p")
+    fi
+done
+if [[ "${#MISSING[@]}" -gt 0 ]]; then
+    echo "installing missing runtime packages: ${MISSING[*]}"
+    sudo apt-get update -q || true
+    sudo apt-get install -y "${MISSING[@]}"
+fi
+
+# Install MLNX OFED ibverbs if missing
+if ! ldconfig -p | grep -q 'libibverbs\.so'; then
+    echo "installing ibverbs from MLNX OFED..."
+    sudo apt-get purge -y rdma-core ibverbs-providers libfabric1 libucx0 2>/dev/null || true
+    sudo apt-get -f install -y || true
+    OFED_OS="ubuntu18.04"
+    if grep -q 'VERSION_ID="20.04"' /etc/os-release 2>/dev/null; then
+        OFED_OS="ubuntu20.04"
+    fi
+    echo "deb [trusted=yes] http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}/x86_64/MLNX_LIBS ./" | sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null
+    sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q || true
+    sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
+        libibverbs1 libibverbs-dev libmlx5-1 librdmacm1 libibumad libibmad || true
+    sudo ldconfig
+fi
+
 if ! ldconfig -p | grep -q 'libcityhash\.so'; then
     cd /tmp
     if [[ ! -d cityhash ]]; then
