@@ -261,6 +261,9 @@ OFEDAPT
         librdmacm1 librdmacm-dev \
         libibumad libibmad infiniband-diags
 
+    # Ensure userspace verbs can talk to kernel RDMA stack.
+    sudo modprobe ib_uverbs || true
+    sudo modprobe mlx5_ib || true
     sudo ldconfig
 }
 
@@ -433,8 +436,8 @@ set -euo pipefail
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$(hostname -s)] starting runtime dependency checks"
 export DEBIAN_FRONTEND=noninteractive
 
-# Install runtime shared libraries needed by deft binaries
-RUNTIME_PKGS=(libgflags-dev libnuma-dev libmemcached-dev libboost-all-dev)
+# Install runtime shared libraries/tools needed by deft binaries
+RUNTIME_PKGS=(numactl libgflags-dev libnuma-dev libmemcached-dev libboost-all-dev)
 MISSING=()
 for p in "${RUNTIME_PKGS[@]}"; do
     if ! dpkg -s "$p" >/dev/null 2>&1; then
@@ -462,6 +465,10 @@ if ! ldconfig -p | grep -q 'libibverbs\.so'; then
         libibverbs1 libibverbs-dev libmlx5-1 librdmacm1 libibumad libibmad || true
     sudo ldconfig
 fi
+
+# Ensure userspace verbs can talk to kernel RDMA stack.
+sudo modprobe ib_uverbs || true
+sudo modprobe mlx5_ib || true
 
 if ! ldconfig -p | grep -q 'libcityhash\.so'; then
     cd /tmp
