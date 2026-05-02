@@ -4,8 +4,6 @@
 #include <cerrno>
 #include <cinttypes>
 #include <cstring>
-#include <fstream>
-#include <string>
 
 namespace {
 
@@ -28,22 +26,6 @@ void gidToStr(const union ibv_gid &gid, char *out, size_t out_len) {
   if (!inet_ntop(AF_INET6, gid.raw, out, out_len)) {
     snprintf(out, out_len, "<invalid-gid>");
   }
-}
-
-bool isPortActive(const char *dev_name, uint8_t port) {
-  std::string p = "/sys/class/infiniband/";
-  p += dev_name;
-  p += "/ports/";
-  p += std::to_string(port);
-  p += "/state";
-  std::ifstream in(p);
-  if (!in.is_open()) {
-    return false;
-  }
-  int state = 0;
-  char colon = '\0';
-  in >> state >> colon;
-  return state == 4; // IBV_PORT_ACTIVE
 }
 
 } // namespace
@@ -78,7 +60,6 @@ bool createContext(RdmaContext *context, int rnic_id, uint8_t port,
                       ibv_get_device_name(deviceList[i]));
   }
 
-  // First honor requested rnic_id by matching known naming conventions.
   for (int i = 0; i < devicesNum; ++i) {
     const char *name = ibv_get_device_name(deviceList[i]);
 
@@ -87,8 +68,6 @@ bool createContext(RdmaContext *context, int rnic_id, uint8_t port,
     if (uscore && std::isdigit(*(uscore + 1)) && *(uscore + 2) == '\0') {
       if ((*(uscore + 1) - '0') == rnic_id) {
         devIndex = i;
-        Debug::notifyInfo("RDMA createContext: matched requested rnic_id=%d to %s (index %d)",
-                          rnic_id, name, i);
         break;
       }
     }
@@ -98,33 +77,6 @@ bool createContext(RdmaContext *context, int rnic_id, uint8_t port,
     if (len >= 2 && name[len - 2] == 'f' && std::isdigit(name[len - 1])) {
       if ((name[len - 1] - '0') == rnic_id) {
         devIndex = i;
-        Debug::notifyInfo("RDMA createContext: matched requested rnic_id=%d to %s (index %d)",
-                          rnic_id, name, i);
-        break;
-      }
-    }
-  }
-
-  // If requested rnic_id didn't match anything, prefer active mlx5_0.
-  if (devIndex < 0) {
-    for (int i = 0; i < devicesNum; ++i) {
-      const char *name = ibv_get_device_name(deviceList[i]);
-      if (strcmp(name, "mlx5_0") == 0 && isPortActive(name, port)) {
-        devIndex = i;
-        Debug::notifyInfo("RDMA createContext: preferring active mlx5_0 at index %d", i);
-        break;
-      }
-    }
-  }
-
-  // Otherwise prefer any active mlx5* port.
-  if (devIndex < 0) {
-    for (int i = 0; i < devicesNum; ++i) {
-      const char *name = ibv_get_device_name(deviceList[i]);
-      if (strncmp(name, "mlx5", 4) == 0 && isPortActive(name, port)) {
-        devIndex = i;
-        Debug::notifyInfo("RDMA createContext: preferring active mlx5 device %s at index %d",
-                          name, i);
         break;
       }
     }
