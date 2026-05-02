@@ -5,6 +5,10 @@ set -euo pipefail
 LOG_FILE=/tmp/cloudlab_setup.log
 exec > >(tee -a "$LOG_FILE") 2>&1
 
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$(hostname -s)] $*"
+}
+
 retry() {
     local attempts="$1"
     local sleep_s="$2"
@@ -71,12 +75,12 @@ ensure_modern_cmake() {
     if command -v cmake >/dev/null 2>&1; then
         cmake_ver="$(cmake --version | awk 'NR==1{print $3}')"
         if version_ge "$cmake_ver" "$min_ver"; then
-            echo "cmake ${cmake_ver} is sufficient."
+            log "cmake ${cmake_ver} is sufficient."
             return 0
         fi
-        echo "cmake ${cmake_ver} is too old for C++20; upgrading..."
+        log "cmake ${cmake_ver} is too old for C++20; upgrading..."
     else
-        echo "cmake not found; installing..."
+        log "cmake not found; installing..."
     fi
 
     arch="$(uname -m)"
@@ -114,12 +118,12 @@ ensure_modern_cmake() {
 
 ensure_modern_gcc() {
     if command -v gcc-10 >/dev/null 2>&1 && command -v g++-10 >/dev/null 2>&1; then
-        echo "gcc-10/g++-10 already present."
+        log "gcc-10/g++-10 already present."
         return 0
     fi
 
     if apt-cache show g++-10 >/dev/null 2>&1 && apt-cache show gcc-10 >/dev/null 2>&1; then
-        echo "installing gcc-10/g++-10 from current apt sources..."
+        log "installing gcc-10/g++-10 from current apt sources..."
         retry 5 10 sudo apt-get install -y gcc-10 g++-10
     fi
 
@@ -130,9 +134,15 @@ ensure_modern_gcc() {
     if [[ -r /etc/os-release ]]; then
         . /etc/os-release
         if [[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == 18.04 ]]; then
-            echo "enabling ubuntu-toolchain-r/test PPA for gcc-10 on Ubuntu 18.04..."
+            log "enabling ubuntu-toolchain-r/test PPA for gcc-10 on Ubuntu 18.04..."
             retry 5 10 sudo apt-get install -y software-properties-common
-            sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            if ! sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test; then
+                log "add-apt-repository failed; using manual PPA source fallback..."
+                echo "deb http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu bionic main" | \
+                    sudo tee /etc/apt/sources.list.d/ubuntu-toolchain-r-test.list >/dev/null
+                sudo apt-key adv --keyserver keyserver.ubuntu.com \
+                    --recv-keys C8EC952E2A0E1FBDC5090F6A2C277A0A352154E5
+            fi
             retry 5 10 sudo apt-get update -q
             retry 5 10 sudo apt-get install -y gcc-10 g++-10
         fi
@@ -146,13 +156,13 @@ ensure_python_cmd() {
     if command -v python >/dev/null 2>&1; then
         py_major="$(python -c 'import sys; print(sys.version_info[0])' 2>/dev/null || true)"
         if [[ "${py_major}" == "3" ]]; then
-            echo "python command already points to Python 3."
+            log "python command already points to Python 3."
             return 0
         fi
     fi
 
     if command -v python3 >/dev/null 2>&1; then
-        echo "setting /usr/local/bin/python -> $(command -v python3)"
+        log "setting /usr/local/bin/python -> $(command -v python3)"
         sudo ln -sfn "$(command -v python3)" /usr/local/bin/python
         return 0
     fi
@@ -172,7 +182,7 @@ ensure_ofed49_userspace() {
     fi
     repo_base="http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${ofed_os}/x86_64"
 
-    echo "ensuring MLNX_OFED 4.9 user-space libraries (${ofed_os})..."
+    log "ensuring MLNX_OFED 4.9 user-space libraries (${ofed_os})..."
 
     sudo rm -f /etc/apt/sources.list.d/mlnx_ofed.list /etc/apt/preferences.d/*mlnx* /etc/apt/preferences.d/*ofed* || true
     sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null <<OFEDAPT
@@ -197,13 +207,13 @@ OFEDAPT
 }
 
 if [[ "$(hostname)" != "mn0" && "$(hostname)" != mn0.* ]]; then
-    echo "error: please run on mn0"
+    log "error: please run on mn0"
     exit 1
 fi
 
 if [[ -r /etc/os-release ]]; then
     . /etc/os-release
-    echo "detected OS: ${PRETTY_NAME:-unknown}"
+    log "detected OS: ${PRETTY_NAME:-unknown}"
 fi
 
 REAL_USER=${SUDO_USER:-$USER}
@@ -211,7 +221,7 @@ REAL_GROUP=$(id -gn "$REAL_USER")
 REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 DEFT_ROOT=/deft_code/deft
 
-echo "[1/6] installing packages on mn0..."
+log "[1/7] installing packages on mn0..."
 export DEBIAN_FRONTEND=noninteractive
 REQ_PKGS=(
     nfs-kernel-server cmake gcc g++
@@ -226,29 +236,29 @@ for p in "${REQ_PKGS[@]}"; do
     fi
 done
 if [[ "${#MISSING_PKGS[@]}" -gt 0 ]]; then
-    echo "installing missing packages: ${MISSING_PKGS[*]}"
+    log "installing missing packages: ${MISSING_PKGS[*]}"
     retry 5 10 sudo apt-get update -q
     retry 5 10 sudo apt-get install -y "${MISSING_PKGS[@]}"
 else
-    echo "all base packages already installed; skipping apt install."
+    log "all base packages already installed; skipping apt install."
 fi
 
 if ! ensure_modern_cmake; then
-    echo "error: unable to install a modern cmake version."
+    log "error: unable to install a modern cmake version."
     exit 1
 fi
 if ! ensure_modern_gcc; then
-    echo "error: unable to install gcc-10/g++-10 required for C++20."
+    log "error: unable to install gcc-10/g++-10 required for C++20."
     exit 1
 fi
 if ! ensure_python_cmd; then
-    echo "error: unable to ensure python command uses Python 3."
+    log "error: unable to ensure python command uses Python 3."
     exit 1
 fi
 ensure_ofed49_userspace
 
 
-echo "[3/6] syncing repository to ${DEFT_ROOT}..."
+log "[2/7] syncing repository to ${DEFT_ROOT}..."
 sudo mkdir -p "$DEFT_ROOT"
 sudo chown "$REAL_USER:$REAL_GROUP" /deft_code "$DEFT_ROOT"
 
@@ -257,7 +267,7 @@ if [[ -d /local/repository/.git ]]; then
 elif [[ -f CMakeLists.txt ]]; then
     sudo rsync -a --delete --exclude build ./ "$DEFT_ROOT"/
 else
-    echo "error: cannot find repo source. expected /local/repository or current repo root."
+    log "error: cannot find repo source. expected /local/repository or current repo root."
     exit 1
 fi
 
@@ -274,7 +284,7 @@ MAKE_JOBS=$(( AVAIL_MEM_KB / 1024 / 1024 / 2 ))
 MAX_CORES=$(nproc)
 [[ $MAKE_JOBS -gt $MAX_CORES ]] && MAKE_JOBS=$MAX_CORES
 
-echo "[4/6] ensuring cityhash..."
+log "[3/7] ensuring cityhash..."
 if ! ldconfig -p | grep -q libcityhash; then
     cd /tmp
     if [[ ! -d cityhash ]]; then
@@ -288,7 +298,7 @@ if ! ldconfig -p | grep -q libcityhash; then
     sudo ldconfig
 fi
 
-echo "[5/6] building deft..."
+log "[4/7] building deft..."
 if command -v gcc-10 >/dev/null 2>&1 && command -v g++-10 >/dev/null 2>&1; then
     export CC="$(command -v gcc-10)"
     export CXX="$(command -v g++-10)"
@@ -309,7 +319,7 @@ make -j"${MAKE_JOBS}"
 test -x ./server
 test -x ./client
 
-echo "[6/7] preparing passwordless ssh from ${REAL_USER}..."
+log "[5/7] preparing passwordless ssh from ${REAL_USER}..."
 sudo -u "$REAL_USER" mkdir -p "${REAL_HOME}/.ssh"
 sudo -u "$REAL_USER" chmod 700 "${REAL_HOME}/.ssh"
 
@@ -341,12 +351,12 @@ for node in "${CLUSTER_NODES[@]}"; do
 done
 
 if [[ "${#SSH_FAIL[@]}" -gt 0 ]]; then
-    echo "error: passwordless ssh from mn0 failed for: ${SSH_FAIL[*]}"
-    echo "hint: run script/link_cluster.sh from your local machine to sync mn key to cn nodes."
+    log "error: passwordless ssh from mn0 failed for: ${SSH_FAIL[*]}"
+    log "hint: run script/link_cluster.sh from your local machine to sync mn key to cn nodes."
     exit 1
 fi
 
-echo "[7/7] ensuring runtime libraries on client nodes..."
+log "[6/7] ensuring runtime libraries on client nodes..."
 RUNTIME_FAIL=()
 for node in "${CLUSTER_NODES[@]}"; do
     if [[ "$node" == "mn0" ]]; then
@@ -357,9 +367,10 @@ for node in "${CLUSTER_NODES[@]}"; do
         RUNTIME_FAIL+=("${node}(unreachable)")
         continue
     fi
-    echo "  -> ${node} (${target})"
+    log "runtime deps on ${node} (${target})"
     if ! sudo -u "$REAL_USER" ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 "${REAL_USER}@${target}" "bash -s" <<'EOF'
 set -euo pipefail
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$(hostname -s)] starting runtime dependency checks"
 export DEBIAN_FRONTEND=noninteractive
 
 # Install runtime shared libraries needed by deft binaries
@@ -371,14 +382,14 @@ for p in "${RUNTIME_PKGS[@]}"; do
     fi
 done
 if [[ "${#MISSING[@]}" -gt 0 ]]; then
-    echo "installing missing runtime packages: ${MISSING[*]}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$(hostname -s)] installing missing runtime packages: ${MISSING[*]}"
     sudo apt-get update -q || true
     sudo apt-get install -y "${MISSING[@]}"
 fi
 
 # Install MLNX OFED ibverbs if missing
 if ! ldconfig -p | grep -q 'libibverbs\.so'; then
-    echo "installing ibverbs from MLNX OFED..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$(hostname -s)] installing ibverbs from MLNX OFED..."
     sudo apt-get purge -y rdma-core ibverbs-providers libfabric1 libucx0 2>/dev/null || true
     sudo apt-get -f install -y || true
     OFED_OS="ubuntu18.04"
@@ -421,9 +432,9 @@ EOF
 done
 
 if [[ "${#RUNTIME_FAIL[@]}" -gt 0 ]]; then
-    echo "error: runtime dependency install failed for: ${RUNTIME_FAIL[*]}"
+    log "error: runtime dependency install failed for: ${RUNTIME_FAIL[*]}"
     exit 1
 fi
 
-echo "done. build + ssh + runtime dependency checks passed."
-echo "next: cd /deft_code/deft/script && python3 gen_config.py && ./cloudlab_run.sh --smoke"
+log "[7/7] done. build + ssh + runtime dependency checks passed."
+log "next: cd /deft_code/deft/script && python3 gen_config.py && ./cloudlab_run.sh --smoke"
