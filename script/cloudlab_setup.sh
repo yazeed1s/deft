@@ -247,9 +247,16 @@ if ! ensure_modern_cmake; then
     log "error: unable to install a modern cmake version."
     exit 1
 fi
-if ! ensure_modern_gcc; then
-    log "error: unable to install gcc-10/g++-10 required for C++20."
-    exit 1
+log "starting gcc-10/g++-10 setup (timeout: 120s)..."
+if timeout 120 bash -lc "$(declare -f log retry version_ge ensure_modern_gcc); ensure_modern_gcc"; then
+    log "gcc setup step completed."
+else
+    rc=$?
+    if [[ "$rc" -eq 124 ]]; then
+        log "warning: gcc setup exceeded 120s; continuing with next steps."
+    else
+        log "warning: gcc setup failed with exit code ${rc}; continuing with next steps."
+    fi
 fi
 if ! ensure_python_cmd; then
     log "error: unable to ensure python command uses Python 3."
