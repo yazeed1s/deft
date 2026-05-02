@@ -259,7 +259,8 @@ OFEDAPT
         libibverbs1 libibverbs-dev ibverbs-utils \
         libmlx5-1 libmlx5-dev \
         librdmacm1 librdmacm-dev \
-        libibumad libibmad infiniband-diags
+        libibumad libibmad infiniband-diags \
+        mlnx-ofed-kernel-dkms mlnx-ofed-kernel-utils
 
     # Ensure userspace verbs can talk to kernel RDMA stack.
     sudo modprobe ib_uverbs || true
@@ -467,7 +468,8 @@ sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-
     libibverbs1 libibverbs-dev \
     libmlx5-1 libmlx5-dev \
     librdmacm1 librdmacm-dev \
-    libibumad libibmad || true
+    libibumad libibmad \
+    mlnx-ofed-kernel-dkms mlnx-ofed-kernel-utils || true
 sudo ldconfig
 
 # Ensure userspace verbs can talk to kernel RDMA stack.
@@ -507,5 +509,20 @@ if [[ "${#RUNTIME_FAIL[@]}" -gt 0 ]]; then
     exit 1
 fi
 
-log "[7/7] done. build + ssh + runtime dependency checks passed."
+log "[7/8] reloading OFED drivers and healing network..."
+for node in "${CLUSTER_NODES[@]}"; do
+    target="${node}"
+    if ! target="$(pick_reachable_ssh_target "${node}")"; then
+        continue
+    fi
+    log "reloading drivers and healing network on ${node} (${target})..."
+    if [[ "$node" == "mn0" ]]; then
+        sudo /etc/init.d/openibd restart || true
+        bash /deft_code/deft/script/net_heal.sh || true
+    else
+        sudo -u "$REAL_USER" ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${REAL_USER}@${target}" "sudo /etc/init.d/openibd restart || true; bash /deft_code/deft/script/net_heal.sh || true" </dev/null
+    fi
+done
+
+log "[8/8] done. build + ssh + runtime dependency checks passed."
 log "next: cd /deft_code/deft/script && python3 gen_config.py && ./cloudlab_run.sh --smoke"

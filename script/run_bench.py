@@ -282,11 +282,11 @@ def main():
                 cmd = (
                     f'cd {exe_path} && '
                     'sudo sh -c "echo 3 > /proc/sys/vm/drop_caches" && '
-                    f'sudo numactl --membind={numa_id} --cpunodebind={numa_id} '
+                    f'sudo bash -c "ulimit -l unlimited && numactl --membind={numa_id} --cpunodebind={numa_id} '
                     f'stdbuf -oL -eL env {hp_env} '
                     f'./{g_cfg["server_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
-                    f'--numa_id {numa_id} --rnic_id {rnic_id} > ../log/server_{i}.log 2>&1'
+                    f'--numa_id {numa_id} --rnic_id {rnic_id} > ../log/server_{i}.log 2>&1"'
                 )
                 print(f'  server {i} cmd: {cmd}')
 
@@ -307,14 +307,14 @@ def main():
                 print(f'start client {i} on {ip} (numa {numa_id})')
                 cmd = (
                     f'cd {exe_path} && '
-                    f'sudo numactl --membind={numa_id} --cpunodebind={numa_id} '
+                    f'sudo bash -c "ulimit -l unlimited && numactl --membind={numa_id} --cpunodebind={numa_id} '
                     f'stdbuf -oL -eL env {hp_env} '
                     f'./{g_cfg["client_app"]} '
                     f'--server_count {num_servers} --client_count {num_clients} '
                     f'--numa_id {numa_id} --rnic_id {rnic_id} --num_prefill_threads {num_prefill_threads} '
                     f'--num_bench_threads {num_threads} --key_space {key_space} '
                     f'--read_ratio {read_ratio} --zipf {zipf} '
-                    f'> ../log/client_{i}.log 2>&1'
+                    f'> ../log/client_{i}.log 2>&1"'
                 )
                 print(f'  client {i} cmd: {cmd}')
                 ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
