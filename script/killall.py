@@ -10,14 +10,16 @@ def killall():
     ip_set = set()
     username=g_cfg['username']
     password=g_cfg['password']
-    for i in range(len(g_cfg['clients'])):
-        ip = g_cfg['clients'][i]['ip']
+    
+    nodes = g_cfg.get('clients', []) + g_cfg.get('servers', [])
+    for node in nodes:
+        ip = node['ip']
         if ip in ip_set:
             continue
         ip_set.add(ip)
         print(f'killall {ip}')
 
-        cmd = f'killall -9 {g_cfg["client_app"]} > /dev/null; killall -9 {g_cfg["server_app"]} > /dev/null'
+        cmd = f'sudo killall -9 {g_cfg["client_app"]} > /dev/null 2>&1; sudo killall -9 {g_cfg["server_app"]} > /dev/null 2>&1'
         ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
         ssh.close()
 
