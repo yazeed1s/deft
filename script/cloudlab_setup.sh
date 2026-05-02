@@ -59,6 +59,48 @@ version_ge() {
     [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | tail -n1)" == "$1" ]]
 }
 
+build_gcc10_from_source() {
+    local gcc_ver="10.5.0"
+    local src_dir="/tmp/gcc-${gcc_ver}"
+    local build_dir="/tmp/gcc-${gcc_ver}-build"
+    local tarball="gcc-${gcc_ver}.tar.xz"
+    local url="https://ftp.gnu.org/gnu/gcc/gcc-${gcc_ver}/${tarball}"
+    local jobs
+
+    log "building gcc-${gcc_ver} from source (fallback)..."
+    retry 3 10 sudo apt-get update -q
+    retry 3 10 sudo apt-get install -y \
+        build-essential flex bison gawk m4 texinfo libgmp-dev libmpfr-dev \
+        libmpc-dev zlib1g-dev wget xz-utils
+
+    if [[ ! -d "${src_dir}" ]]; then
+        cd /tmp
+        retry 3 10 wget -q -L -O "${tarball}" "${url}"
+        rm -rf "${src_dir}"
+        tar -xf "${tarball}"
+    fi
+
+    cd "${src_dir}"
+    ./contrib/download_prerequisites
+
+    rm -rf "${build_dir}"
+    mkdir -p "${build_dir}"
+    cd "${build_dir}"
+    "${src_dir}/configure" \
+        --prefix=/opt/gcc-10 \
+        --disable-multilib \
+        --enable-languages=c,c++
+
+    jobs="$(nproc)"
+    [[ -z "${jobs}" || "${jobs}" -lt 1 ]] && jobs=1
+    make -j"${jobs}"
+    sudo make install
+
+    sudo ln -sfn /opt/gcc-10/bin/gcc-10 /usr/local/bin/gcc-10
+    sudo ln -sfn /opt/gcc-10/bin/g++-10 /usr/local/bin/g++-10
+    hash -r || true
+}
+
 
 
 
@@ -135,17 +177,33 @@ ensure_modern_gcc() {
         . /etc/os-release
         if [[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == 18.04 ]]; then
             log "enabling ubuntu-toolchain-r/test PPA for gcc-10 on Ubuntu 18.04..."
-            retry 5 10 sudo apt-get install -y software-properties-common
-            if ! sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test; then
-                log "add-apt-repository failed; using manual PPA source fallback..."
-                echo "deb http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu bionic main" | \
-                    sudo tee /etc/apt/sources.list.d/ubuntu-toolchain-r-test.list >/dev/null
-                sudo apt-key adv --keyserver keyserver.ubuntu.com \
-                    --recv-keys C8EC952E2A0E1FBDC5090F6A2C277A0A352154E5
+            if timeout 60 bash -lc '
+                set -euo pipefail
+                sudo apt-get install -y software-properties-common
+                if ! sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test; then
+                    echo "deb http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu bionic main" | \
+                        sudo tee /etc/apt/sources.list.d/ubuntu-toolchain-r-test.list >/dev/null
+                    sudo apt-key adv --keyserver keyserver.ubuntu.com \
+                        --recv-keys C8EC952E2A0E1FBDC5090F6A2C277A0A352154E5
+                fi
+                sudo apt-get update -q
+                sudo apt-get install -y gcc-10 g++-10
+            '; then
+                :
+            else
+                rc=$?
+                if [[ "$rc" -eq 124 ]]; then
+                    log "gcc PPA path timed out after 60s; falling back to source build."
+                else
+                    log "gcc PPA path failed (rc=${rc}); falling back to source build."
+                fi
+                build_gcc10_from_source
             fi
-            retry 5 10 sudo apt-get update -q
-            retry 5 10 sudo apt-get install -y gcc-10 g++-10
         fi
+    fi
+
+    if ! (command -v gcc-10 >/dev/null 2>&1 && command -v g++-10 >/dev/null 2>&1); then
+        build_gcc10_from_source
     fi
 
     command -v gcc-10 >/dev/null 2>&1 && command -v g++-10 >/dev/null 2>&1
@@ -247,17 +305,12 @@ if ! ensure_modern_cmake; then
     log "error: unable to install a modern cmake version."
     exit 1
 fi
-log "starting gcc-10/g++-10 setup (timeout: 120s)..."
-if timeout 120 bash -lc "$(declare -f log retry version_ge ensure_modern_gcc); ensure_modern_gcc"; then
-    log "gcc setup step completed."
-else
-    rc=$?
-    if [[ "$rc" -eq 124 ]]; then
-        log "warning: gcc setup exceeded 120s; continuing with next steps."
-    else
-        log "warning: gcc setup failed with exit code ${rc}; continuing with next steps."
-    fi
+log "starting gcc-10/g++-10 setup..."
+if ! ensure_modern_gcc; then
+    log "error: unable to install gcc-10/g++-10 required for C++20."
+    exit 1
 fi
+log "gcc setup step completed."
 if ! ensure_python_cmd; then
     log "error: unable to ensure python command uses Python 3."
     exit 1
