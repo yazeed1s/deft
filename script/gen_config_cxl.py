@@ -30,6 +30,9 @@ def detect_preferred_numa_id():
 def main():
     username = getpass.getuser()
     numa_id = detect_preferred_numa_id()
+    cxl_client_count = int(os.getenv("CXL_CLIENT_COUNT", "5"))
+    if cxl_client_count <= 0:
+        cxl_client_count = 1
 
     # CXL: both server and client on the same machine (mn0 / localhost)
     local_ip = "127.0.0.1"
@@ -43,7 +46,7 @@ def main():
         'username': username,
         'password': '',
         'servers': [{'ip': local_ip, 'numa_id': numa_id}],
-        'clients': [{'ip': local_ip, 'numa_id': numa_id}],
+        'clients': [{'ip': local_ip, 'numa_id': numa_id} for _ in range(cxl_client_count)],
     }
 
     out_path = '/deft_code/deft/script/global_config.yaml'
@@ -59,7 +62,7 @@ def main():
 
     print(f"done. CXL config written to {out_path}")
     print(f"  server: {local_ip} (NUMA {numa_id})")
-    print(f"  client: {local_ip} (NUMA {numa_id})")
+    print(f"  clients: {cxl_client_count} x {local_ip} (NUMA {numa_id})")
     print(f"  build:  build_cxl/")
 
 if __name__ == '__main__':

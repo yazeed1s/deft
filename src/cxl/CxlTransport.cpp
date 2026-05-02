@@ -113,15 +113,17 @@ void destroy_region(SharedRegion &region) {
 // RPC message queue
 // ---------------------------------------------------------------------------
 
-uint64_t rpc_region_size(uint32_t num_app_threads, uint32_t num_directories) {
+uint64_t rpc_region_size(uint32_t num_clients, uint32_t num_app_threads,
+                         uint32_t num_directories) {
   // One queue = header (128 B) + capacity * MessageSlot (128 B each)
   const uint64_t per_queue =
       128 + (uint64_t)kRpcSlotCapacity * sizeof(MessageSlot);
 
-  // Request queues: num_app_threads * num_directories
-  // Reply   queues: num_app_threads
+  // Request queues: num_clients * num_app_threads * num_directories
+  // Reply   queues: num_clients * num_app_threads
   uint64_t num_queues =
-      (uint64_t)num_app_threads * num_directories + num_app_threads;
+      (uint64_t)num_clients * num_app_threads * num_directories +
+      (uint64_t)num_clients * num_app_threads;
 
   // Meta header (aligned to 4 KB for cleanliness)
   const uint64_t meta_size = 4096;
@@ -129,9 +131,10 @@ uint64_t rpc_region_size(uint32_t num_app_threads, uint32_t num_directories) {
   return meta_size + num_queues * per_queue;
 }
 
-void init_rpc_region(void *base, uint32_t num_app_threads,
+void init_rpc_region(void *base, uint32_t num_clients, uint32_t num_app_threads,
                      uint32_t num_directories) {
   auto *meta = reinterpret_cast<RpcRegionMeta *>(base);
+  meta->num_clients = num_clients;
   meta->num_app_threads = num_app_threads;
   meta->num_directories = num_directories;
   meta->slot_capacity = kRpcSlotCapacity;
@@ -142,15 +145,32 @@ void init_rpc_region(void *base, uint32_t num_app_threads,
   uint64_t offset = meta_size;
 
   // Request queues
-  for (uint32_t t = 0; t < num_app_threads; ++t) {
-    for (uint32_t d = 0; d < num_directories; ++d) {
-      meta->req_queue_offset[t][d] = offset;
-      auto *q =
-          reinterpret_cast<RpcQueueHeader *>((char *)base + offset);
+  for (uint32_t c = 0; c < num_clients; ++c) {
+    for (uint32_t t = 0; t < num_app_threads; ++t) {
+      for (uint32_t d = 0; d < num_directories; ++d) {
+        meta->req_queue_offset[c][t][d] = offset;
+        auto *q =
+            reinterpret_cast<RpcQueueHeader *>((char *)base + offset);
+        q->capacity = kRpcSlotCapacity;
+        q->head.store(0, std::memory_order_relaxed);
+        q->tail.store(0, std::memory_order_relaxed);
+        // Zero all slots
+        for (uint32_t s = 0; s < kRpcSlotCapacity; ++s) {
+          q->slots()[s].valid.store(0, std::memory_order_relaxed);
+        }
+        offset += per_queue;
+      }
+    }
+  }
+
+  // Reply queues
+  for (uint32_t c = 0; c < num_clients; ++c) {
+    for (uint32_t t = 0; t < num_app_threads; ++t) {
+      meta->rep_queue_offset[c][t] = offset;
+      auto *q = reinterpret_cast<RpcQueueHeader *>((char *)base + offset);
       q->capacity = kRpcSlotCapacity;
       q->head.store(0, std::memory_order_relaxed);
       q->tail.store(0, std::memory_order_relaxed);
-      // Zero all slots
       for (uint32_t s = 0; s < kRpcSlotCapacity; ++s) {
         q->slots()[s].valid.store(0, std::memory_order_relaxed);
       }
@@ -158,26 +178,13 @@ void init_rpc_region(void *base, uint32_t num_app_threads,
     }
   }
 
-  // Reply queues
-  for (uint32_t t = 0; t < num_app_threads; ++t) {
-    meta->rep_queue_offset[t] = offset;
-    auto *q = reinterpret_cast<RpcQueueHeader *>((char *)base + offset);
-    q->capacity = kRpcSlotCapacity;
-    q->head.store(0, std::memory_order_relaxed);
-    q->tail.store(0, std::memory_order_relaxed);
-    for (uint32_t s = 0; s < kRpcSlotCapacity; ++s) {
-      q->slots()[s].valid.store(0, std::memory_order_relaxed);
-    }
-    offset += per_queue;
-  }
-
   std::atomic_thread_fence(std::memory_order_release);
 
-  Debug::notifyInfo("cxl::init_rpc_region: %u app_threads, %u dirs, "
+  Debug::notifyInfo("cxl::init_rpc_region: %u clients, %u app_threads, %u dirs, "
                     "total %lu bytes, %lu queues",
-                    num_app_threads, num_directories, offset,
-                    (uint64_t)num_app_threads * num_directories +
-                        num_app_threads);
+                    num_clients, num_app_threads, num_directories, offset,
+                    (uint64_t)num_clients * num_app_threads * num_directories +
+                        (uint64_t)num_clients * num_app_threads);
 }
 
 void rpc_send(RpcQueueHeader *q, const void *msg, size_t msg_size) {

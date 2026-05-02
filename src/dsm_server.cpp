@@ -93,9 +93,10 @@ void DSMServer::InitCxlMemory() {
 
   // 3. Create RPC region for message queues
   uint64_t rpc_size =
-      cxl::rpc_region_size(MAX_APP_THREAD, NR_DIRECTORY);
+      cxl::rpc_region_size(conf_.num_client, MAX_APP_THREAD, NR_DIRECTORY);
   rpc_region_ = cxl::create_region("/deft_rpc", rpc_size);
-  cxl::init_rpc_region(rpc_region_.base_addr, MAX_APP_THREAD, NR_DIRECTORY);
+  cxl::init_rpc_region(rpc_region_.base_addr, conf_.num_client,
+                       MAX_APP_THREAD, NR_DIRECTORY);
   Debug::notifyInfo("CXL RPC region: %p, %lu bytes",
                     rpc_region_.base_addr, rpc_size);
 
@@ -144,7 +145,7 @@ void DSMServer::ProcessMessage(const RawMessage *m, uint16_t dir_id) {
   // Send reply back through the client's reply queue
   if (has_reply) {
     auto *rep_q =
-        cxl::get_reply_queue(rpc_region_.base_addr, m->app_id);
+        cxl::get_reply_queue(rpc_region_.base_addr, m->node_id, m->app_id);
     cxl::rpc_send(rep_q, &reply, sizeof(reply));
   }
 }
@@ -157,16 +158,18 @@ void DSMServer::Run() {
   // This is the CXL equivalent of the RDMA server's ibv_poll_cq loop.
   bool running = true;
   while (running) {
-    for (uint32_t t = 0; t < MAX_APP_THREAD && running; ++t) {
-      for (uint32_t d = 0; d < NR_DIRECTORY && running; ++d) {
-        auto *req_q =
-            cxl::get_request_queue(rpc_region_.base_addr, t, d);
+    for (uint32_t c = 0; c < (uint32_t)conf_.num_client && running; ++c) {
+      for (uint32_t t = 0; t < MAX_APP_THREAD && running; ++t) {
+        for (uint32_t d = 0; d < NR_DIRECTORY && running; ++d) {
+          auto *req_q =
+              cxl::get_request_queue(rpc_region_.base_addr, c, t, d);
 
-        RawMessage m;
-        if (cxl::rpc_try_recv(req_q, &m, sizeof(m))) {
-          ProcessMessage(&m, d);
-          if (m.type == RpcType::TERMINATE) {
-            running = false;
+          RawMessage m;
+          if (cxl::rpc_try_recv(req_q, &m, sizeof(m))) {
+            ProcessMessage(&m, d);
+            if (m.type == RpcType::TERMINATE) {
+              running = false;
+            }
           }
         }
       }

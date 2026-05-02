@@ -103,8 +103,8 @@ inline uint64_t fetch_and_add(void *remote_addr, uint64_t add_val) {
 //   │  MessageSlot[capacity]                                    │
 //   └────────────────────────────────────────────────────────────┘
 //
-// We allocate one request queue per (app_thread, directory) pair
-// and one reply queue per app_thread.
+// We allocate one request queue per (client, app_thread, directory) tuple
+// and one reply queue per (client, app_thread).
 //
 // Client writes a request into the next slot and sets `valid = 1`.
 // Server polls, processes, writes the reply into the reply queue,
@@ -151,8 +151,8 @@ struct RpcQueueHeader {
 /// How many bytes are needed for the entire RPC shared-memory region?
 /// Layout:
 ///   [0]                 : RpcRegionMeta
-///   [meta.req_offset[t][d]] : request queue for app thread t → dir d
-///   [meta.rep_offset[t]]    : reply queue for app thread t
+///   [meta.req_offset[c][t][d]] : request queue for client c, thread t → dir d
+///   [meta.rep_offset[c][t]]    : reply queue for client c, thread t
 ///
 /// We pre-compute offsets once when the server creates the region.
 
@@ -162,44 +162,49 @@ constexpr uint32_t kRpcSlotCapacity = 64;  // slots per queue (power of 2)
 // We can't include Common.h here (circular), so we mirror the constants.
 constexpr uint32_t kCxlMaxAppThread  = 32;
 constexpr uint32_t kCxlMaxDirectory  = 1;   // NR_DIRECTORY
+constexpr uint32_t kCxlMaxClient     = 32;  // max client processes
 
 /// Metadata stored at the start of the RPC shared region so both
 /// server and client can locate queues by (thread, dir) indices.
 struct RpcRegionMeta {
+  uint32_t num_clients;
   uint32_t num_app_threads;
   uint32_t num_directories;
   uint32_t slot_capacity;  // kRpcSlotCapacity
-  uint32_t _pad;
+  uint32_t _pad0;
 
   /// Byte offset (from region base) for the request queue
-  /// from app thread `t` to directory `d`.
-  uint64_t req_queue_offset[kCxlMaxAppThread][kCxlMaxDirectory];
+  /// from client `c`, app thread `t` to directory `d`.
+  uint64_t req_queue_offset[kCxlMaxClient][kCxlMaxAppThread][kCxlMaxDirectory];
 
   /// Byte offset (from region base) for the reply queue
-  /// for app thread `t`.
-  uint64_t rep_queue_offset[kCxlMaxAppThread];
+  /// for client `c`, app thread `t`.
+  uint64_t rep_queue_offset[kCxlMaxClient][kCxlMaxAppThread];
 };
 
 /// Compute the total byte size needed for the RPC region.
-uint64_t rpc_region_size(uint32_t num_app_threads, uint32_t num_directories);
+uint64_t rpc_region_size(uint32_t num_clients, uint32_t num_app_threads,
+                         uint32_t num_directories);
 
 /// Initialize the RPC region metadata and all queues (server side).
-void init_rpc_region(void *base, uint32_t num_app_threads,
+void init_rpc_region(void *base, uint32_t num_clients, uint32_t num_app_threads,
                      uint32_t num_directories);
 
 /// Get a pointer to a specific request queue.
-inline RpcQueueHeader *get_request_queue(void *rpc_base, uint32_t thread_id,
+inline RpcQueueHeader *get_request_queue(void *rpc_base, uint32_t client_id,
+                                         uint32_t thread_id,
                                          uint32_t dir_id) {
   auto *meta = reinterpret_cast<RpcRegionMeta *>(rpc_base);
-  uint64_t off = meta->req_queue_offset[thread_id][dir_id];
+  uint64_t off = meta->req_queue_offset[client_id][thread_id][dir_id];
   return reinterpret_cast<RpcQueueHeader *>(
       reinterpret_cast<char *>(rpc_base) + off);
 }
 
 /// Get a pointer to a specific reply queue.
-inline RpcQueueHeader *get_reply_queue(void *rpc_base, uint32_t thread_id) {
+inline RpcQueueHeader *get_reply_queue(void *rpc_base, uint32_t client_id,
+                                       uint32_t thread_id) {
   auto *meta = reinterpret_cast<RpcRegionMeta *>(rpc_base);
-  uint64_t off = meta->rep_queue_offset[thread_id];
+  uint64_t off = meta->rep_queue_offset[client_id][thread_id];
   return reinterpret_cast<RpcQueueHeader *>(
       reinterpret_cast<char *>(rpc_base) + off);
 }

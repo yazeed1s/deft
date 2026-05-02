@@ -1283,13 +1283,14 @@ void DSMClient::RpcCallDir(const RawMessage &m, uint16_t /*node_id*/,
 
   // Send to the request queue for (this thread, dir_id)
   auto *req_q = cxl::get_request_queue(rpc_region_.base_addr,
-                                        thread_id_, dir_id);
+                                        my_client_id_, thread_id_, dir_id);
   cxl::rpc_send(req_q, &buf, sizeof(buf));
 }
 
 RawMessage *DSMClient::RpcWait() {
   // Block on our reply queue until the server responds
-  auto *rep_q = cxl::get_reply_queue(rpc_region_.base_addr, thread_id_);
+  auto *rep_q = cxl::get_reply_queue(rpc_region_.base_addr, my_client_id_,
+                                     thread_id_);
   cxl::rpc_recv(rep_q, &rpc_reply_buf_, sizeof(rpc_reply_buf_));
   return &rpc_reply_buf_;
 }

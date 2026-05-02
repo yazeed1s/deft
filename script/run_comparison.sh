@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run RDMA and CXL benchmark campaigns back-to-back, then plot comparison.
-# Usage: ./run_comparison.sh [--smoke-only] [--force-hugepage]
+# Usage: ./run_comparison.sh [--smoke-only] [--ycsba-full] [--force-hugepage]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -21,6 +21,8 @@ ZIPFS="0.99"
 REPEATS=3
 FORCE_HP=""
 RDMA_FORCE_HP="--force-hugepage"
+CXL_CLIENT_COUNT="${CXL_CLIENT_COUNT:-5}"
+WORKLOAD_LABEL="mixed-read-ratio"
 
 for arg in "$@"; do
     case "$arg" in
@@ -28,6 +30,15 @@ for arg in "$@"; do
             MODES="smoke"
             READ_RATIOS="50"
             REPEATS=1
+            ZIPFS="0.99"
+            WORKLOAD_LABEL="ycsba-smoke"
+            ;;
+        --ycsba-full)
+            MODES="smoke,small,mid,big"
+            READ_RATIOS="50"
+            ZIPFS="0.0,0.5,0.8,0.99"
+            REPEATS=5
+            WORKLOAD_LABEL="ycsba-full"
             ;;
         --force-hugepage)
             FORCE_HP="--force-hugepage"
@@ -45,10 +56,29 @@ echo "============================================"
 echo "  RDMA vs CXL Benchmark Comparison"
 echo "  Modes: ${MODES}"
 echo "  Read ratios: ${READ_RATIOS}"
+echo "  Zipfs: ${ZIPFS}"
 echo "  Repeats: ${REPEATS}"
+echo "  Workload label: ${WORKLOAD_LABEL}"
+echo "  CXL localhost clients: ${CXL_CLIENT_COUNT}"
 echo "  RDMA output: ${RDMA_OUT}"
 echo "  CXL output:  ${CXL_OUT}"
 echo "============================================"
+
+HP_FLAG=0
+if [[ -n "${FORCE_HP}" ]]; then
+    HP_FLAG=1
+fi
+
+cat > "${COMP_OUT}/test_manifest.txt" <<EOF
+workload_label=${WORKLOAD_LABEL}
+modes=${MODES}
+read_ratios=${READ_RATIOS}
+zipfs=${ZIPFS}
+repeats=${REPEATS}
+force_hugepage=${HP_FLAG}
+rdma_topology=from_gen_config.py
+cxl_topology=1_server_localhost_${CXL_CLIENT_COUNT}_clients_localhost
+EOF
 
 # ── Phase 1: Build CXL if needed ──
 if [[ ! -x "${DEFT_ROOT}/build_cxl/server" ]]; then
@@ -82,7 +112,7 @@ fi
 # ── Phase 3: CXL Campaign ──
 echo ""
 echo "========== CXL CAMPAIGN =========="
-python3 gen_config_cxl.py   # switches config to localhost + build_cxl
+CXL_CLIENT_COUNT="${CXL_CLIENT_COUNT}" python3 gen_config_cxl.py   # switches config to localhost + build_cxl
 
 python3 run_campaign.py \
     --modes "$MODES" \
