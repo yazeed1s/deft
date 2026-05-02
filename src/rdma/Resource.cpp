@@ -78,13 +78,42 @@ bool createContext(RdmaContext *context, int rnic_id, uint8_t port,
                       ibv_get_device_name(deviceList[i]));
   }
 
-  // Prefer active mlx5_0 explicitly (stable across our CloudLab setups).
+  // First honor requested rnic_id by matching known naming conventions.
   for (int i = 0; i < devicesNum; ++i) {
     const char *name = ibv_get_device_name(deviceList[i]);
-    if (strcmp(name, "mlx5_0") == 0 && isPortActive(name, port)) {
-      devIndex = i;
-      Debug::notifyInfo("RDMA createContext: preferring active mlx5_0 at index %d", i);
-      break;
+
+    // Old OFED naming style: mlx5_0, mlx5_1, ...
+    const char *uscore = strrchr(name, '_');
+    if (uscore && std::isdigit(*(uscore + 1)) && *(uscore + 2) == '\0') {
+      if ((*(uscore + 1) - '0') == rnic_id) {
+        devIndex = i;
+        Debug::notifyInfo("RDMA createContext: matched requested rnic_id=%d to %s (index %d)",
+                          rnic_id, name, i);
+        break;
+      }
+    }
+
+    // New naming style: rocep1s0f0, rocep1s0f1, ...
+    size_t len = strlen(name);
+    if (len >= 2 && name[len - 2] == 'f' && std::isdigit(name[len - 1])) {
+      if ((name[len - 1] - '0') == rnic_id) {
+        devIndex = i;
+        Debug::notifyInfo("RDMA createContext: matched requested rnic_id=%d to %s (index %d)",
+                          rnic_id, name, i);
+        break;
+      }
+    }
+  }
+
+  // If requested rnic_id didn't match anything, prefer active mlx5_0.
+  if (devIndex < 0) {
+    for (int i = 0; i < devicesNum; ++i) {
+      const char *name = ibv_get_device_name(deviceList[i]);
+      if (strcmp(name, "mlx5_0") == 0 && isPortActive(name, port)) {
+        devIndex = i;
+        Debug::notifyInfo("RDMA createContext: preferring active mlx5_0 at index %d", i);
+        break;
+      }
     }
   }
 
@@ -97,31 +126,6 @@ bool createContext(RdmaContext *context, int rnic_id, uint8_t port,
         Debug::notifyInfo("RDMA createContext: preferring active mlx5 device %s at index %d",
                           name, i);
         break;
-      }
-    }
-  }
-
-  // Backward-compatible rnic_id mapping if no active mlx5 preference matched.
-  if (devIndex < 0) {
-    for (int i = 0; i < devicesNum; ++i) {
-      const char *name = ibv_get_device_name(deviceList[i]);
-
-      // Old OFED naming style: mlx5_0, mlx5_1, ...
-      const char *uscore = strrchr(name, '_');
-      if (uscore && std::isdigit(*(uscore + 1)) && *(uscore + 2) == '\0') {
-        if ((*(uscore + 1) - '0') == rnic_id) {
-          devIndex = i;
-          break;
-        }
-      }
-
-      // New naming style: rocep1s0f0, rocep1s0f1, ...
-      size_t len = strlen(name);
-      if (len >= 2 && name[len - 2] == 'f' && std::isdigit(name[len - 1])) {
-        if ((name[len - 1] - '0') == rnic_id) {
-          devIndex = i;
-          break;
-        }
       }
     }
   }

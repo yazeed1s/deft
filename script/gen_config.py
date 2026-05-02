@@ -27,6 +27,15 @@ def detect_rnic_id():
     except Exception:
         return 0
 
+def resolve_rnic_id():
+    env_val = os.getenv("RNIC_ID")
+    if env_val is not None and env_val.strip() != "":
+        try:
+            return int(env_val.strip())
+        except ValueError:
+            print(f"warning: invalid RNIC_ID='{env_val}', falling back to auto-detect")
+    return detect_rnic_id()
+
 def detect_preferred_numa_id():
     try:
         nodes = sorted(
@@ -64,7 +73,7 @@ def main():
         'app_rel_path': 'build',
         'server_app': 'server',
         'client_app': 'client',
-        'rnic_id': detect_rnic_id(),
+        'rnic_id': resolve_rnic_id(),
         'username': username,
         'password': '',
         'servers': [],

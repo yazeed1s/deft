@@ -6,6 +6,15 @@ import socket
 import yaml
 import glob
 
+def resolve_rnic_id():
+    env_val = os.getenv("RNIC_ID")
+    if env_val is not None and env_val.strip() != "":
+        try:
+            return int(env_val.strip())
+        except ValueError:
+            print(f"warning: invalid RNIC_ID='{env_val}', defaulting to 0")
+    return 0
+
 def detect_preferred_numa_id():
     try:
         nodes = sorted(
@@ -30,7 +39,7 @@ def main():
         'app_rel_path': 'build_cxl',
         'server_app': 'server',
         'client_app': 'client',
-        'rnic_id': 0,            # unused under CXL but required by gflags
+        'rnic_id': resolve_rnic_id(),  # unused under CXL but required by gflags
         'username': username,
         'password': '',
         'servers': [{'ip': local_ip, 'numa_id': numa_id}],

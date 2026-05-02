@@ -451,20 +451,24 @@ if [[ "${#MISSING[@]}" -gt 0 ]]; then
 fi
 
 # Install MLNX OFED ibverbs if missing
-if ! ldconfig -p | grep -q 'libibverbs\.so'; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$(hostname -s)] installing ibverbs from MLNX OFED..."
-    sudo apt-get purge -y rdma-core ibverbs-providers libfabric1 libucx0 2>/dev/null || true
-    sudo apt-get -f install -y || true
-    OFED_OS="ubuntu18.04"
-    if grep -q 'VERSION_ID="20.04"' /etc/os-release 2>/dev/null; then
-        OFED_OS="ubuntu20.04"
-    fi
-    echo "deb [trusted=yes] http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}/x86_64/MLNX_LIBS ./" | sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null
-    sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q || true
-    sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
-        libibverbs1 libibverbs-dev libmlx5-1 librdmacm1 libibumad libibmad || true
-    sudo ldconfig
+# Enforce MLNX OFED userspace stack to match mn0 and avoid mixed-RDMA setups.
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$(hostname -s)] enforcing MLNX OFED userspace RDMA stack..."
+sudo apt-get purge -y rdma-core ibverbs-providers libfabric1 libucx0 \
+    libibverbs1 libibverbs-dev librdmacm1 2>/dev/null || true
+sudo apt-get -f install -y || true
+OFED_OS="ubuntu18.04"
+if grep -q 'VERSION_ID="20.04"' /etc/os-release 2>/dev/null; then
+    OFED_OS="ubuntu20.04"
 fi
+echo "deb [trusted=yes] http://linux.mellanox.com/public/repo/mlnx_ofed/4.9-5.1.0.0/${OFED_OS}/x86_64/MLNX_LIBS ./" | sudo tee /etc/apt/sources.list.d/mlnx_ofed.list >/dev/null
+sudo apt-get -o Acquire::AllowInsecureRepositories=true update -q || true
+sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-unauthenticated \
+    ibverbs-utils infiniband-diags \
+    libibverbs1 libibverbs-dev \
+    libmlx5-1 libmlx5-dev \
+    librdmacm1 librdmacm-dev \
+    libibumad libibmad || true
+sudo ldconfig
 
 # Ensure userspace verbs can talk to kernel RDMA stack.
 sudo modprobe ib_uverbs || true
