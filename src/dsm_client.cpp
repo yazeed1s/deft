@@ -723,6 +723,54 @@ RawMessage *DSMClient::RpcWait() {
 
 #include "dsm_client.h"
 
+namespace {
+
+inline uint64_t masked_fetch_add_boundary_u64(std::atomic<uint64_t> *target,
+                                              uint64_t add_val,
+                                              uint64_t boundary_mask) {
+  uint64_t old = target->load(std::memory_order_acquire);
+  while (true) {
+    uint64_t next = old;
+    // Emulate RDMA masked-boundary FAA semantics on four 16-bit lanes.
+    for (int lane = 0; lane < 4; ++lane) {
+      const int shift = lane * 16;
+      const uint64_t lane_mask = 0xFFFFull << shift;
+      if ((boundary_mask & (0x8000ull << shift)) == 0) {
+        continue;
+      }
+      const uint16_t cur =
+          static_cast<uint16_t>((old & lane_mask) >> shift);
+      const uint16_t add =
+          static_cast<uint16_t>((add_val & lane_mask) >> shift);
+      const uint16_t out = static_cast<uint16_t>(cur + add);
+      next = (next & ~lane_mask) | (static_cast<uint64_t>(out) << shift);
+    }
+    if (target->compare_exchange_weak(old, next, std::memory_order_acq_rel,
+                                      std::memory_order_acquire)) {
+      return old;
+    }
+  }
+}
+
+inline bool cas_mask_sync_result(int log_sz, uint64_t equal,
+                                 uint64_t *old_value_buf, uint64_t mask) {
+  if (log_sz <= 3) {
+    return (equal & mask) == (*old_value_buf & mask);
+  }
+  const int words = 1 << (log_sz - 3);
+  const auto *eq = reinterpret_cast<const uint64_t *>(equal);
+  const auto *old = reinterpret_cast<const uint64_t *>(old_value_buf);
+  const auto *m = reinterpret_cast<const uint64_t *>(mask);
+  for (int i = 0; i < words; ++i) {
+    if ((eq[i] & m[i]) != (old[i] & m[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace
+
 // --- Thread-local static definitions ---
 thread_local int DSMClient::thread_id_ = -1;
 thread_local char *DSMClient::rdma_buffer_ = nullptr;
@@ -1091,9 +1139,11 @@ bool DSMClient::CasMaskWriteSync(RdmaOpRegion &cas_ror, uint64_t equal,
 // --- Group 5: FAA on DSM pool ---
 
 void DSMClient::FaaBound(GlobalAddress gaddr, int /*log_sz*/, uint64_t add_val,
-                         uint64_t *rdma_buffer, uint64_t /*mask*/, bool /*signal*/,
+                         uint64_t *rdma_buffer, uint64_t mask, bool /*signal*/,
                          CoroContext * /*ctx*/) {
-  uint64_t old = cxl::fetch_and_add(ResolveAddr(gaddr), add_val);
+  auto *target =
+      reinterpret_cast<std::atomic<uint64_t> *>(ResolveAddr(gaddr));
+  uint64_t old = masked_fetch_add_boundary_u64(target, add_val, mask);
   if (rdma_buffer) *rdma_buffer = old;
 }
 
@@ -1164,26 +1214,15 @@ bool DSMClient::CasDmMaskSync(GlobalAddress gaddr, int log_sz, uint64_t equal,
                               uint64_t val, uint64_t *rdma_buffer, uint64_t mask,
                               CoroContext * /*ctx*/) {
   CasDmMask(gaddr, log_sz, equal, val, rdma_buffer, mask, true);
-
-  if (log_sz <= 3) {
-    return (equal & mask) == (*rdma_buffer & mask);
-  } else {
-    uint64_t *eq = (uint64_t *)equal;
-    uint64_t *old = (uint64_t *)rdma_buffer;
-    uint64_t *m = (uint64_t *)mask;
-    for (int i = 0; i < (1 << (log_sz - 3)); i++) {
-      if ((eq[i] & m[i]) != (old[i] & m[i])) {
-        return false;
-      }
-    }
-    return true;
-  }
+  return cas_mask_sync_result(log_sz, equal, rdma_buffer, mask);
 }
 
 void DSMClient::FaaDmBound(GlobalAddress gaddr, int /*log_sz*/, uint64_t add_val,
-                           uint64_t *rdma_buffer, uint64_t /*mask*/, bool /*signal*/,
+                           uint64_t *rdma_buffer, uint64_t mask, bool /*signal*/,
                            CoroContext * /*ctx*/) {
-  uint64_t old = cxl::fetch_and_add(ResolveLockAddr(gaddr), add_val);
+  auto *target =
+      reinterpret_cast<std::atomic<uint64_t> *>(ResolveLockAddr(gaddr));
+  uint64_t old = masked_fetch_add_boundary_u64(target, add_val, mask);
   if (rdma_buffer) *rdma_buffer = old;
 }
 
