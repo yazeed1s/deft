@@ -5,6 +5,7 @@ import getpass
 import re
 import subprocess
 import yaml
+import glob
 
 def resolve_ip(hostname):
     try:
@@ -23,6 +24,18 @@ def detect_rnic_id():
             if dev == "mlx5_2":
                 return i
         return 0 # Default to the first device (e.g. mlx4_0)
+    except Exception:
+        return 0
+
+def detect_preferred_numa_id():
+    try:
+        nodes = sorted(
+            int(os.path.basename(p).replace("node", ""))
+            for p in glob.glob("/sys/devices/system/node/node[0-9]*")
+        )
+        if not nodes:
+            return 0
+        return 1 if 1 in nodes else 0
     except Exception:
         return 0
 
@@ -59,10 +72,10 @@ def main():
     }
 
     for ip in mn_ips:
-        config['servers'].append({'ip': ip, 'numa_id': 1})
+        config['servers'].append({'ip': ip, 'numa_id': detect_preferred_numa_id()})
 
-    # Clemson r650 + mlx5_2 path runs on NUMA 1.
-    for numa_id in [1]:
+    numa_id = detect_preferred_numa_id()
+    for numa_id in [numa_id]:
         for ip in cn_ips:
             config['clients'].append({'ip': ip, 'numa_id': numa_id})
 

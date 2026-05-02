@@ -4,9 +4,23 @@ import getpass
 import os
 import socket
 import yaml
+import glob
+
+def detect_preferred_numa_id():
+    try:
+        nodes = sorted(
+            int(os.path.basename(p).replace("node", ""))
+            for p in glob.glob("/sys/devices/system/node/node[0-9]*")
+        )
+        if not nodes:
+            return 0
+        return 1 if 1 in nodes else 0
+    except Exception:
+        return 0
 
 def main():
     username = getpass.getuser()
+    numa_id = detect_preferred_numa_id()
 
     # CXL: both server and client on the same machine (mn0 / localhost)
     local_ip = "127.0.0.1"
@@ -19,8 +33,8 @@ def main():
         'rnic_id': 0,            # unused under CXL but required by gflags
         'username': username,
         'password': '',
-        'servers': [{'ip': local_ip, 'numa_id': 0}],
-        'clients': [{'ip': local_ip, 'numa_id': 1}],  # pin client to NUMA 1
+        'servers': [{'ip': local_ip, 'numa_id': numa_id}],
+        'clients': [{'ip': local_ip, 'numa_id': numa_id}],
     }
 
     out_path = '/deft_code/deft/script/global_config.yaml'
@@ -35,8 +49,8 @@ def main():
         f.write(f"{local_ip}\n11211\n")
 
     print(f"done. CXL config written to {out_path}")
-    print(f"  server: {local_ip} (NUMA 0)")
-    print(f"  client: {local_ip} (NUMA 1)")
+    print(f"  server: {local_ip} (NUMA {numa_id})")
+    print(f"  client: {local_ip} (NUMA {numa_id})")
     print(f"  build:  build_cxl/")
 
 if __name__ == '__main__':
