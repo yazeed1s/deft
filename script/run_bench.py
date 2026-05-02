@@ -77,6 +77,38 @@ def dump_remote_log(ip, username, password, log_path, role, idx, lines=80):
     except Exception as e:
         print(f"failed to fetch {role} {idx} log from {ip}: {e}")
 
+def sample_proc_usage(ip, username, password, proc_name):
+    """
+    Return (cpu_sum_pct, rss_sum_mb, proc_count) on a node for process name.
+    CPU is sum of %CPU across matching processes. RSS is sum in MB.
+    """
+    cmd = (
+        "bash -lc '"
+        f"ps -C {proc_name} -o %cpu=,rss= 2>/dev/null || true"
+        "'"
+    )
+    try:
+        ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
+        out = stdout.read().decode("utf-8", errors="replace").strip()
+        ssh.close()
+    except Exception:
+        return (0.0, 0.0, 0)
+
+    cpu_sum = 0.0
+    rss_kb_sum = 0.0
+    cnt = 0
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            cpu_sum += float(parts[0])
+            rss_kb_sum += float(parts[1])
+            cnt += 1
+        except ValueError:
+            continue
+    return (cpu_sum, rss_kb_sum / 1024.0, cnt)
+
 def check_hugepages(g_cfg, force_hugepage=False):
     username = g_cfg['username']
     password = g_cfg['password']
@@ -328,8 +360,34 @@ def main():
             has_error = False
             server_exit_codes = [None] * num_servers
             client_exit_codes = [None] * num_clients
+            server_cpu_samples = []
+            server_rss_mb_samples = []
+            client_cpu_samples = []
+            client_rss_mb_samples = []
             while not finish and not has_error:
                 time.sleep(2)
+                # Sample resource usage while benchmark processes are running.
+                server_cpu_total = 0.0
+                server_rss_total = 0.0
+                for i in range(num_servers):
+                    ip = g_cfg['servers'][i]['ip']
+                    cpu, rss_mb, _ = sample_proc_usage(ip, username, password, g_cfg["server_app"])
+                    server_cpu_total += cpu
+                    server_rss_total += rss_mb
+
+                client_cpu_total = 0.0
+                client_rss_total = 0.0
+                for i in range(num_clients):
+                    ip = g_cfg['clients'][i]['ip']
+                    cpu, rss_mb, _ = sample_proc_usage(ip, username, password, g_cfg["client_app"])
+                    client_cpu_total += cpu
+                    client_rss_total += rss_mb
+
+                server_cpu_samples.append(server_cpu_total)
+                server_rss_mb_samples.append(server_rss_total)
+                client_cpu_samples.append(client_cpu_total)
+                client_rss_mb_samples.append(client_rss_total)
+
                 finish = True
                 for i in range(num_servers):
                     if server_stdouts[i].channel.exit_status_ready():
@@ -400,6 +458,28 @@ def main():
                 else:
                     print("warning: cannot find final results")
                 fp.flush()
+
+            def _avg(vals):
+                return (sum(vals) / len(vals)) if vals else 0.0
+
+            server_cpu_avg = _avg(server_cpu_samples)
+            server_rss_avg = _avg(server_rss_mb_samples)
+            client_cpu_avg = _avg(client_cpu_samples)
+            client_rss_avg = _avg(client_rss_mb_samples)
+            cluster_cpu_avg = server_cpu_avg + client_cpu_avg
+            cluster_rss_avg = server_rss_avg + client_rss_avg
+            res_line = (
+                "Resource Summary: "
+                f"server_cpu_avg_pct={server_cpu_avg:.2f} "
+                f"server_rss_avg_mb={server_rss_avg:.2f} "
+                f"client_cpu_avg_pct={client_cpu_avg:.2f} "
+                f"client_rss_avg_mb={client_rss_avg:.2f} "
+                f"cluster_cpu_avg_pct={cluster_cpu_avg:.2f} "
+                f"cluster_rss_avg_mb={cluster_rss_avg:.2f}"
+            )
+            print(res_line)
+            fp.write(res_line + "\n")
+            fp.flush()
 
             print("cleaning up...")
             subprocess.run(f'cd ../script && ./killall.py', stdout=subprocess.DEVNULL, shell=True)

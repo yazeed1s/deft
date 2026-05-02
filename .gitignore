@@ -19,3 +19,6 @@ rdma_troubleshooting_2026-05-02.md
 POST_REBOOT_RECOVERY.md
 .codex
 build_cxl
+
+# local experiment notes
+/deft_breakage_plan_local.md

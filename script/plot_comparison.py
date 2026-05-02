@@ -13,7 +13,7 @@ import argparse
 import csv
 import os
 from collections import defaultdict
-from statistics import median, quantiles
+from statistics import median
 
 import matplotlib
 matplotlib.use("Agg")
@@ -38,7 +38,12 @@ def to_float(v):
 
 def aggregate(rows):
     """Group by (transport, mode, read_ratio, zipf) → lists of tp/lat."""
-    agg = defaultdict(lambda: {"tp": [], "lat": [], "ok": 0, "all": 0, "threads": []})
+    agg = defaultdict(
+        lambda: {
+            "tp": [], "lat": [], "ok": 0, "all": 0, "threads": [],
+            "cpu": [], "rss": [],
+        }
+    )
     for r in rows:
         key = (
             r["transport"],
@@ -58,6 +63,12 @@ def aggregate(rows):
                 agg[key]["tp"].append(tp)
             if lat is not None:
                 agg[key]["lat"].append(lat)
+            cpu = to_float(r.get("cluster_cpu_avg_pct"))
+            rss = to_float(r.get("cluster_rss_avg_mb"))
+            if cpu is not None:
+                agg[key]["cpu"].append(cpu)
+            if rss is not None:
+                agg[key]["rss"].append(rss)
     return agg
 
 
@@ -66,10 +77,18 @@ COLORS = {"rdma": "#2196F3", "cxl": "#FF5722"}
 BAR_WIDTH = 0.35
 
 def p25_p75(vals):
-    if len(vals) < 2:
-        return (vals[0], vals[0]) if vals else (None, None)
-    q = quantiles(vals, n=4, method="inclusive")
-    return q[0], q[2]
+    if not vals:
+        return (None, None)
+    if len(vals) == 1:
+        return (vals[0], vals[0])
+    xs = sorted(vals)
+    def pct(p):
+        idx = (len(xs) - 1) * p
+        lo = int(idx)
+        hi = min(lo + 1, len(xs) - 1)
+        frac = idx - lo
+        return xs[lo] * (1 - frac) + xs[hi] * frac
+    return pct(0.25), pct(0.75)
 
 def med_iqr(vals):
     if not vals:
@@ -77,6 +96,133 @@ def med_iqr(vals):
     med = median(vals)
     p25, p75 = p25_p75(vals)
     return med, p25, p75
+
+def _combo_keys(agg):
+    keys = set()
+    for (transport, mode, rr, zf) in agg.keys():
+        keys.add((mode, rr, zf))
+    return sorted(keys, key=lambda x: (x[0], x[1], x[2]))
+
+def plot_metric_combined(agg, outdir, metric, ylabel, filename, title):
+    """Single combined grouped-bar plot across all (mode, rr, zipf) permutations."""
+    combos = _combo_keys(agg)
+    if not combos:
+        return
+
+    labels = [f"{m}|rr{rr}|z{zf:.2f}" for (m, rr, zf) in combos]
+    rdma_vals, cxl_vals = [], []
+    rdma_err_low, rdma_err_high = [], []
+    cxl_err_low, cxl_err_high = [], []
+
+    for (mode, rr, zf) in combos:
+        rdma_key = ("rdma", mode, rr, zf)
+        cxl_key = ("cxl", mode, rr, zf)
+        rdma_data = agg[rdma_key][metric] if rdma_key in agg else []
+        cxl_data = agg[cxl_key][metric] if cxl_key in agg else []
+        rmed, rp25, rp75 = med_iqr(rdma_data)
+        cmed, cp25, cp75 = med_iqr(cxl_data)
+        rdma_vals.append(rmed if rmed is not None else 0)
+        cxl_vals.append(cmed if cmed is not None else 0)
+        rdma_err_low.append((rmed - rp25) if rmed is not None else 0)
+        rdma_err_high.append((rp75 - rmed) if rmed is not None else 0)
+        cxl_err_low.append((cmed - cp25) if cmed is not None else 0)
+        cxl_err_high.append((cp75 - cmed) if cmed is not None else 0)
+
+    fig, ax = plt.subplots(figsize=(16, 6))
+    x = range(len(labels))
+    off = BAR_WIDTH / 2
+    ax.bar(
+        [i - off for i in x], rdma_vals, BAR_WIDTH, color=COLORS["rdma"],
+        label="RDMA (median)", yerr=[rdma_err_low, rdma_err_high], capsize=3
+    )
+    ax.bar(
+        [i + off for i in x], cxl_vals, BAR_WIDTH, color=COLORS["cxl"],
+        label="CXL (median)", yerr=[cxl_err_low, cxl_err_high], capsize=3
+    )
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.grid(axis="y", alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, filename), dpi=180)
+    plt.close(fig)
+
+def plot_resource_vs_threads(agg, outdir, metric, ylabel, filename, title):
+    fig, ax = plt.subplots(figsize=(10, 6))
+    plotted = False
+    for (transport, mode, rr, zf), v in sorted(agg.items()):
+        if not v[metric] or not v["threads"]:
+            continue
+        t = int(median(v["threads"]))
+        m = median(v[metric])
+        label = f"{transport.upper()} {mode}|rr{rr}|z{zf:.2f}"
+        ax.scatter(
+            [t], [m],
+            color=COLORS[transport],
+            marker="o" if transport == "rdma" else "s",
+            s=70,
+            alpha=0.85,
+            label=label
+        )
+        plotted = True
+    if not plotted:
+        plt.close(fig)
+        return
+    ax.set_xlabel("Total Threads")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.grid(alpha=0.3)
+    handles, labels = ax.get_legend_handles_labels()
+    uniq = {}
+    for h, l in zip(handles, labels):
+        if l not in uniq:
+            uniq[l] = h
+    ax.legend(list(uniq.values()), list(uniq.keys()), fontsize=8, ncol=2, loc="best")
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, filename), dpi=180)
+    plt.close(fig)
+
+def plot_tp_vs_threads_combined(agg, outdir):
+    """Single combined scatter: throughput vs total threads across all permutations."""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    plotted = False
+
+    for (transport, mode, rr, zf), v in sorted(agg.items()):
+        if not v["tp"] or not v["threads"]:
+            continue
+        t = int(median(v["threads"]))
+        tp = median(v["tp"])
+        label = f"{transport.upper()} {mode}|rr{rr}|z{zf:.2f}"
+        ax.scatter(
+            [t], [tp],
+            color=COLORS[transport],
+            marker="o" if transport == "rdma" else "s",
+            s=70,
+            alpha=0.85,
+            label=label
+        )
+        plotted = True
+
+    if not plotted:
+        plt.close(fig)
+        return
+
+    ax.set_xlabel("Total Threads")
+    ax.set_ylabel("Throughput (Mops/s)")
+    ax.set_title("Throughput vs Thread Count (All Permutations)")
+    ax.grid(alpha=0.3)
+    # de-duplicate legend entries
+    handles, labels = ax.get_legend_handles_labels()
+    uniq = {}
+    for h, l in zip(handles, labels):
+        if l not in uniq:
+            uniq[l] = h
+    ax.legend(list(uniq.values()), list(uniq.keys()), fontsize=8, ncol=2, loc="best")
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, "tp_vs_threads_combined.png"), dpi=180)
+    plt.close(fig)
 
 
 def plot_metric_vs_readratio(agg, outdir, metric, ylabel, prefix):
@@ -204,9 +350,11 @@ def write_summary(rows, agg, outdir):
             transport, mode, rr, zf = key
             med_tp = f"{median(v['tp']):.3f}" if v["tp"] else "-"
             med_lat = f"{median(v['lat']):.3f}" if v["lat"] else "-"
+            med_cpu = f"{median(v['cpu']):.2f}" if v["cpu"] else "-"
+            med_rss = f"{median(v['rss']):.2f}" if v["rss"] else "-"
             thr = int(median(v["threads"])) if v["threads"] else 0
             fp.write(f"{transport:<10} {mode:<8} {rr:<5} {zf:<6.2f} {thr:<8} "
-                     f"{med_tp:<12} {med_lat:<12} {v['ok']}/{v['all']}\n")
+                     f"{med_tp:<12} {med_lat:<12} cpu={med_cpu:<8} rss_mb={med_rss:<10} {v['ok']}/{v['all']}\n")
 
         fp.write("\ncomparability_warnings:\n")
         pairs = defaultdict(dict)
@@ -259,9 +407,29 @@ def main():
 
     write_merged_csv(all_rows, outdir)
     write_summary(all_rows, agg, outdir)
-    plot_metric_vs_readratio(agg, outdir, "tp", "Throughput (Mops/s)", "Throughput")
-    plot_metric_vs_readratio(agg, outdir, "lat", "Latency (µs)", "Latency")
-    plot_tp_vs_threads(agg, outdir)
+    # Core performance plots.
+    plot_metric_combined(
+        agg, outdir, "tp", "Throughput (Mops/s)",
+        "throughput_combined.png",
+        "Throughput: RDMA vs CXL (All Permutations)"
+    )
+    plot_metric_combined(
+        agg, outdir, "lat", "Latency (µs)",
+        "latency_combined.png",
+        "Latency: RDMA vs CXL (All Permutations)"
+    )
+    plot_tp_vs_threads_combined(agg, outdir)
+    # Resource plots.
+    plot_resource_vs_threads(
+        agg, outdir, "cpu", "Cluster CPU (% sum across processes)",
+        "cpu_vs_threads_combined.png",
+        "CPU vs Thread Count (All Permutations)"
+    )
+    plot_resource_vs_threads(
+        agg, outdir, "rss", "Cluster RSS (MB sum across processes)",
+        "rss_vs_threads_combined.png",
+        "Memory RSS vs Thread Count (All Permutations)"
+    )
 
     print(f"\nplots and summary written to: {outdir}/")
 

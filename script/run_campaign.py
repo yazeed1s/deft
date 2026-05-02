@@ -17,6 +17,15 @@ LINE_JOB = re.compile(
     r"starting job \d+/\d+: total_threads=(\d+) .* key_space=(\d+) read_ratio=([0-9.]+) zipf=([0-9.]+)"
 )
 LINE_FAIL = re.compile(r"(server|client)\s+(\d+)\s+failed with exit code\s+(-?\d+)")
+LINE_RESOURCE = re.compile(
+    r"Resource Summary:\s+"
+    r"server_cpu_avg_pct=([0-9.]+)\s+"
+    r"server_rss_avg_mb=([0-9.]+)\s+"
+    r"client_cpu_avg_pct=([0-9.]+)\s+"
+    r"client_rss_avg_mb=([0-9.]+)\s+"
+    r"cluster_cpu_avg_pct=([0-9.]+)\s+"
+    r"cluster_rss_avg_mb=([0-9.]+)"
+)
 
 
 def parse_list_int(s):
@@ -36,7 +45,8 @@ def parse_modes(s):
     return modes
 
 
-def run_one(script_dir, mode, rr, zf, repeat_id, force_hugepage, run_name):
+def run_one(script_dir, mode, rr, zf, repeat_id, force_hugepage, run_name,
+            threads_per_client=None, prefill_threads=None, key_space=None):
     cmd = [
         "python3",
         "run_bench.py",
@@ -50,6 +60,12 @@ def run_one(script_dir, mode, rr, zf, repeat_id, force_hugepage, run_name):
     ]
     if force_hugepage:
         cmd.append("--force-hugepage")
+    if threads_per_client is not None:
+        cmd += ["--threads-per-client", str(threads_per_client)]
+    if prefill_threads is not None:
+        cmd += ["--prefill-threads", str(prefill_threads)]
+    if key_space is not None:
+        cmd += ["--key-space", str(key_space)]
 
     t0 = time.time()
     proc = subprocess.Popen(
@@ -81,6 +97,7 @@ def run_one(script_dir, mode, rr, zf, repeat_id, force_hugepage, run_name):
     m_done = LINE_DONE.search(out)
     m_job = LINE_JOB.search(out)
     m_fail = LINE_FAIL.search(out)
+    m_res = LINE_RESOURCE.search(out)
 
     row = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -100,6 +117,12 @@ def run_one(script_dir, mode, rr, zf, repeat_id, force_hugepage, run_name):
         "final_lat_us": "",
         "elapsed_sec": f"{dt:.2f}",
         "result_file": m_done.group(1).strip() if m_done else "",
+        "server_cpu_avg_pct": "",
+        "server_rss_avg_mb": "",
+        "client_cpu_avg_pct": "",
+        "client_rss_avg_mb": "",
+        "cluster_cpu_avg_pct": "",
+        "cluster_rss_avg_mb": "",
     }
 
     if m_job:
@@ -112,6 +135,13 @@ def run_one(script_dir, mode, rr, zf, repeat_id, force_hugepage, run_name):
     if m_final:
         row["final_tp_mops"] = m_final.group(1)
         row["final_lat_us"] = m_final.group(2)
+    if m_res:
+        row["server_cpu_avg_pct"] = m_res.group(1)
+        row["server_rss_avg_mb"] = m_res.group(2)
+        row["client_cpu_avg_pct"] = m_res.group(3)
+        row["client_rss_avg_mb"] = m_res.group(4)
+        row["cluster_cpu_avg_pct"] = m_res.group(5)
+        row["cluster_rss_avg_mb"] = m_res.group(6)
 
     if proc.returncode != 0 or not m_final:
         row["status"] = "fail"
@@ -135,6 +165,12 @@ def main():
                         help="comma list, e.g. 0.0,0.8,0.99")
     parser.add_argument("--repeats", type=int, default=3, help="repeats per (mode,read_ratio,zipf)")
     parser.add_argument("--force-hugepage", action="store_true", help="pass --force-hugepage to run_bench.py")
+    parser.add_argument("--threads-per-client", type=int, default=None,
+                        help="pass --threads-per-client to run_bench.py")
+    parser.add_argument("--prefill-threads", type=int, default=None,
+                        help="pass --prefill-threads to run_bench.py")
+    parser.add_argument("--key-space", type=int, default=None,
+                        help="pass --key-space to run_bench.py")
     parser.add_argument("--outdir", type=str, default="", help="output directory")
     args = parser.parse_args()
 
@@ -152,6 +188,9 @@ def main():
         "total_threads", "key_space",
         "loading_tp_mops", "loading_lat_us",
         "final_tp_mops", "final_lat_us",
+        "server_cpu_avg_pct", "server_rss_avg_mb",
+        "client_cpu_avg_pct", "client_rss_avg_mb",
+        "cluster_cpu_avg_pct", "cluster_rss_avg_mb",
         "elapsed_sec", "result_file",
     ]
 
@@ -179,6 +218,9 @@ def main():
                             repeat_id=rep,
                             force_hugepage=args.force_hugepage,
                             run_name=run_name,
+                            threads_per_client=args.threads_per_client,
+                            prefill_threads=args.prefill_threads,
+                            key_space=args.key_space,
                         )
                         writer.writerow(row)
                         fp.flush()
