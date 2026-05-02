@@ -7,6 +7,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEFT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$SCRIPT_DIR"
 
+cleanup_local_artifacts() {
+    pkill -9 server >/dev/null 2>&1 || true
+    pkill -9 client >/dev/null 2>&1 || true
+    rm -f /dev/shm/deft_dsm /dev/shm/deft_lock /dev/shm/deft_rpc >/dev/null 2>&1 || true
+}
+
+trap cleanup_local_artifacts EXIT
+
 MODES="smoke,small,mid"
 READ_RATIOS="0,50,100"
 ZIPFS="0.99"
@@ -63,6 +71,13 @@ python3 run_campaign.py \
     --outdir "$RDMA_OUT"
 
 echo "RDMA campaign done: ${RDMA_OUT}/runs.csv"
+
+# Fail fast: do not proceed to CXL when RDMA campaign has failures.
+if awk -F, 'NR>1 && $7=="fail"{found=1} END{exit(found?0:1)}' "${RDMA_OUT}/runs.csv"; then
+    echo "error: RDMA campaign has failures. Skipping CXL phase."
+    echo "check: ${RDMA_OUT}/runs.csv"
+    exit 1
+fi
 
 # ── Phase 3: CXL Campaign ──
 echo ""

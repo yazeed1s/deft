@@ -7,7 +7,7 @@ with open('../script/global_config.yaml', 'r') as f:
     g_cfg = yaml.safe_load(f)
 
 SERVER_HUGEPAGE_FRACTION = 0.40
-CLIENT_HUGEPAGE_MIN = 2048
+CLIENT_HUGEPAGE_MIN = 2304
 
 def query_total_ram_pages(ip, username, password):
     from ssh_connect import ssh_command
@@ -49,12 +49,16 @@ def all_hugepage():
         cmd = (
             f"bash -lc '"
             f"echo {target} | sudo -n tee /sys/devices/system/node/node{numa_id}/hugepages/hugepages-2048kB/nr_hugepages >/dev/null "
-            f"&& echo 0 | sudo -n tee /sys/devices/system/node/node{other_numa}/hugepages/hugepages-2048kB/nr_hugepages >/dev/null "
+            f"&& if [ -d /sys/devices/system/node/node{other_numa} ]; then "
+            f"echo 0 | sudo -n tee /sys/devices/system/node/node{other_numa}/hugepages/hugepages-2048kB/nr_hugepages >/dev/null; "
+            f"fi "
             f"&& sudo -n sysctl -w vm.nr_hugepages={target} >/dev/null "
-            f"&& sudo -n sysctl -w kernel.watchdog_thresh=120 "
+            f"&& sudo -n sysctl -w kernel.watchdog_thresh=120 >/dev/null "
             f"&& echo total=$(cat /proc/sys/vm/nr_hugepages) "
             f"&& echo node{numa_id}=$(cat /sys/devices/system/node/node{numa_id}/hugepages/hugepages-2048kB/free_hugepages) "
-            f"&& echo node{other_numa}=$(cat /sys/devices/system/node/node{other_numa}/hugepages/hugepages-2048kB/free_hugepages)'"
+            f"&& if [ -d /sys/devices/system/node/node{other_numa} ]; then "
+            f"echo node{other_numa}=$(cat /sys/devices/system/node/node{other_numa}/hugepages/hugepages-2048kB/free_hugepages); "
+            f"fi'"
         )
         try:
             ssh, stdin, stdout, stderr = ssh_command(ip, username, password, cmd)
