@@ -41,7 +41,7 @@ def aggregate(rows):
     agg = defaultdict(
         lambda: {
             "tp": [], "lat": [], "ok": 0, "all": 0, "threads": [],
-            "cpu": [], "rss": [],
+            "cpu": [], "rss": [], "key_space": [],
         }
     )
     for r in rows:
@@ -55,6 +55,9 @@ def aggregate(rows):
         thr = int(r.get("total_threads") or 0)
         if thr > 0:
             agg[key]["threads"].append(thr)
+        ks = to_float(r.get("key_space"))
+        if ks is not None and ks > 0:
+            agg[key]["key_space"].append(ks)
         if r["status"] == "ok":
             agg[key]["ok"] += 1
             tp = to_float(r["final_tp_mops"])
@@ -171,6 +174,42 @@ def plot_resource_vs_threads(agg, outdir, metric, ylabel, filename, title):
         plt.close(fig)
         return
     ax.set_xlabel("Total Threads")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.grid(alpha=0.3)
+    handles, labels = ax.get_legend_handles_labels()
+    uniq = {}
+    for h, l in zip(handles, labels):
+        if l not in uniq:
+            uniq[l] = h
+    ax.legend(list(uniq.values()), list(uniq.keys()), fontsize=8, ncol=2, loc="best")
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, filename), dpi=180)
+    plt.close(fig)
+
+def plot_metric_vs_keyspace(agg, outdir, metric, ylabel, filename, title):
+    fig, ax = plt.subplots(figsize=(10, 6))
+    plotted = False
+    for (transport, mode, rr, zf), v in sorted(agg.items()):
+        if not v[metric] or not v["key_space"]:
+            continue
+        ks = median(v["key_space"])
+        m = median(v[metric])
+        label = f"{transport.upper()} {mode}|rr{rr}|z{zf:.2f}"
+        ax.scatter(
+            [ks], [m],
+            color=COLORS[transport],
+            marker="o" if transport == "rdma" else "s",
+            s=70,
+            alpha=0.85,
+            label=label
+        )
+        plotted = True
+    if not plotted:
+        plt.close(fig)
+        return
+    ax.set_xscale("log")
+    ax.set_xlabel("Key Space (log scale)")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.grid(alpha=0.3)
@@ -429,6 +468,22 @@ def main():
         agg, outdir, "rss", "Cluster RSS (MB sum across processes)",
         "rss_vs_threads_combined.png",
         "Memory RSS vs Thread Count (All Permutations)"
+    )
+    # Key-space sensitivity plots.
+    plot_metric_vs_keyspace(
+        agg, outdir, "tp", "Throughput (Mops/s)",
+        "tp_vs_keyspace_combined.png",
+        "Throughput vs Key Space (All Permutations)"
+    )
+    plot_metric_vs_keyspace(
+        agg, outdir, "cpu", "Cluster CPU (% sum across processes)",
+        "cpu_vs_keyspace_combined.png",
+        "CPU vs Key Space (All Permutations)"
+    )
+    plot_metric_vs_keyspace(
+        agg, outdir, "rss", "Cluster RSS (MB sum across processes)",
+        "rss_vs_keyspace_combined.png",
+        "RSS vs Key Space (All Permutations)"
     )
 
     print(f"\nplots and summary written to: {outdir}/")

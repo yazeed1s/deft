@@ -1,0 +1,581 @@
+\documentclass[aspectratio=169,10pt]{beamer}
+
+% ============================================================
+% THEME + STYLE (VT CUSTOMIZED)
+% ============================================================
+\usetheme[progressbar=frametitle,numbering=fraction]{metropolis}
+\usepackage{appendixnumberbeamer}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{tikz}
+\newcommand{\pro}[1]{\textbf{#1}}
+\usetikzlibrary{positioning,calc,arrows.meta,fit,backgrounds,shapes.geometric}
+
+\definecolor{VTMaroon}{RGB}{134,31,65}
+\definecolor{VTOrange}{RGB}{232,119,34}
+\setbeamercolor{frametitle}{fg=white,bg=VTMaroon}
+\setbeamercolor{progress bar}{fg=VTOrange,bg=VTMaroon!20}
+\setbeamersize{text margin left=8pt, text margin right=8pt, }
+\newcommand{\hl}[1]{\textcolor{VTMaroon}{\textbf{#1}}}
+\newcommand{\sys}[1]{\texttt{#1}}
+
+\title{Deft: A Scalable Tree Index for Disaggregated Memory}
+\subtitle{EuroSys '25 \,|\, Wang, Wang, Zhang, Shu}
+\author{Yazeed Alharthi}
+\date{CS 6204 -- Spring 2026}
+
+\begin{document}
+
+% ------------------------------------------------------------
+\begin{frame}[plain]
+    \maketitle
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{What is Deft?}
+
+\textbf{Deft is a B+Tree redesigned for disaggregated memory that mitigates network bottlenecks and scales concurrency.}
+
+\vspace{0.3cm}
+
+\begin{block}{The Triple Threat: Three Core Challenges }
+    \begin{itemize}
+        \item \hl{1. I/O Amplification}: RDMA forces reading full 1KB nodes, wasting bandwidth and saturating the NIC.
+        \item \hl{2. Write Contention}: Standard exclusive locks require multiple network round trips for \texttt{RDMA\_CAS} retries.
+        \item \hl{3. Read-Write Consistency}: Readers may observe "torn" data due to the lack of ordering in one-sided RDMA reads.
+    \end{itemize}
+\end{block}
+
+\vspace{0.2cm}
+
+\begin{exampleblock}{The Deft Insight}
+    Maintain \textbf{large nodes} (low tree height) but perform \textbf{fine-grained access} (read/write only the small pieces actually needed)
+\end{exampleblock}
+
+
+
+\end{frame}
+
+% ------------------------------------------------------------
+
+% ------------------------------------------------------------
+% ------------------------------------------------------------
+% ------------------------------------------------------------
+\begin{frame}{Problem 1: I/O Amplification}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.5\textwidth}
+\begin{block}{The Problem}
+RDMA forces reading the \textbf{entire node} (e.g., 1KB) even if we only need a small part.
+\end{block}
+
+\begin{alertblock}{Why This Is Bad}
+\begin{itemize}
+    \item Wastes network bandwidth (reading unnecessary data).
+    \item Quickly \textbf{saturates the NIC}, limiting throughput.
+\end{itemize}
+\end{alertblock}
+
+\begin{exampleblock}{The Tradeoff}
+Theoretical I/O size is $O(F \cdot \log_F N)$. Large nodes (fanout $F$) reduce height but waste bandwidth; small nodes reduce waste but increase height/round trips.
+\end{exampleblock}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+    \centering
+
+    \includegraphics[width=\linewidth,keepaspectratio]{images/figure1.png} \\
+    \footnotesize{Fig 1: Read performance vs. node size.}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ------------------------------------------------------------
+% ------------------------------------------------------------
+% ------------------------------------------------------------
+\begin{frame}{Solution 1: Fine-Grained Node Access}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.45\textwidth}
+\begin{itemize}
+    \item \hl{Leaf Nodes}: Hash-based structure.
+    \item Read only a \textbf{bucket pair} ($\sim$128B) via one \texttt{RDMA\_READ}.
+    \item \hl{Internal Nodes}: Segmented structure.
+    \item Read only the \textbf{target sub-node} containing the key.
+    \item \hl{Impact}: Reduces I/O granularity without increasing tree height.
+\end{itemize}
+\end{column}
+
+\begin{column}{0.5\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.35\textheight,keepaspectratio]{images/figure4.png} \\
+    \footnotesize{Fig 4: Hash-based Leaf Node} \\
+    \vspace{0.3cm}
+    \includegraphics[width=\linewidth,height=0.35\textheight,keepaspectratio]{images/figure5.png} \\
+    \footnotesize{Fig 5: Segmented Internal Node}
+\end{column}
+\end{columns}
+\end{frame}
+% ------------------------------------------------------------
+
+% ------------------------------------------------------------
+% ------------------------------------------------------------
+\begin{frame}{Problem 2: Write Contention}
+
+\begin{block}{The Problem}
+Multiple threads updating the same node require \textbf{exclusive locks}
+\end{block}
+
+\vspace{0.2cm}
+
+\begin{alertblock}{Why This Is Bad in RDMA}
+\begin{itemize}
+    \item Lock = remote atomic operation (\sys{RDMA\_CAS})
+    \item High contention $\rightarrow$ many retries
+    \item Each retry = \textbf{network round trip}
+\end{itemize}
+\end{alertblock}
+
+\vspace{0.2cm}
+
+\begin{block}{Result}
+Poor scalability under high concurrency and skewed workloads
+\end{block}
+
+\end{frame}
+
+% ------------------------------------------------------------
+% ------------------------------------------------------------
+% ------------------------------------------------------------
+\begin{frame}{Solution 2: Scalable Concurrency (SX Lock)}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.55\textwidth}
+\begin{itemize}
+    \item \hl{Avoid full-node locking}: Updates use \textbf{atomic RDMA\_CAS} at entry level.
+    \item \hl{Hash-based leaf}: Updates spread across buckets $\rightarrow$ fewer conflicts.
+    \item \hl{Shared-Exclusive (SX) Lock}:
+    \begin{itemize}
+        \item \textbf{Shared mode}: Many threads update in parallel via bakery-style ticketing.
+        \item \textbf{Exclusive mode}: Only for rare operations (node split/SMO).
+    \end{itemize}
+\end{itemize}
+
+\vspace{0.1cm}
+\begin{block}{Technical Expansion}
+\small
+\begin{itemize}
+    \item 64-bit layout with 2 pairs of counters and tickets.
+    \item Uses \textbf{masked RDMA\_FAA} to prevent bit-field overflow.
+    \item Allows lock upgrade (Shared $\rightarrow$ Exclusive) in one round trip.
+\end{itemize}
+\end{block}
+\end{column}
+
+\begin{column}{0.43\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,keepaspectratio]{images/figure6.png} \\
+    \footnotesize{Fig 6: SX Lock Format}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Problem 3: Read-Write Consistency}
+
+\begin{block}{The Problem}
+A reader may observe \textbf{inconsistent data} if a write happens at the same time
+\end{block}
+
+\vspace{0.2cm}
+
+\begin{alertblock}{Why This Is Hard in RDMA}
+\begin{itemize}
+    \item RDMA reads are not strictly ordered
+    \item May read \textbf{partial updates} (old + new data mixed)
+\end{itemize}
+\end{alertblock}
+
+\vspace{0.2cm}
+
+\begin{block}{Existing Solutions}
+\begin{itemize}
+    \item Multiple reads (versioning)
+    \item Extra computation (checksum)
+\end{itemize}
+\end{block}
+
+\end{frame}
+
+% ------------------------------------------------------------
+% ------------------------------------------------------------
+% ------------------------------------------------------------
+\begin{frame}{Solution 3: Lightweight Consistency (OPDV)}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.55\textwidth}
+\begin{itemize}
+    \item \hl{Key Idea}: Use \textbf{parent pointer} to validate child node.
+    \item \textbf{Commit Version ($V_C$)}: Stored in parent pointer.
+    \item \textbf{Data Version ($V_D$)}: Stored in child node.
+\end{itemize}
+
+\begin{block}{Read Process}
+\begin{itemize}
+    \item Read $V_C$ from parent $\rightarrow$ Read child node ($V_D$).
+    \item Check: $V_C == V_D$ $\rightarrow$ consistent, else retry.
+\end{itemize}
+\end{block}
+
+\begin{exampleblock}{The Secret Sauce: PCIe Ordering}
+\small
+RDMA writes data in increasing address order. Since $V_D$ is placed at the start of each cache line, readers observe an inconsistency if a write is partial. This enables correct validation without extra RDMA reads.
+\end{exampleblock}
+\end{column}
+
+\begin{column}{0.43\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,keepaspectratio]{images/figure7.png} \\
+    \footnotesize{Fig 7: OPDV Node Layout}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ------------------------------------------------------------
+% ------------------------------------------------------------
+\begin{frame}{Evaluation: Breaking Down the 9.5x Gain}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.45\textwidth}
+\small
+\begin{itemize}
+    \item \hl{OPDV}: +46\% gain by removing checksum/multiple reads.
+    \item \hl{Hash-Leaf}: 2.1x gain via 128B vs 1KB read granularity.
+    \item \hl{SCC (SX-Lock)}: 2.5x gain under high contention.
+    \item \hl{Internal Nodes}: 56\% gain when cache is disabled.
+\end{itemize}
+\end{column}
+
+\begin{column}{0.5\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,keepaspectratio]{images/figure9.png} \\
+    \footnotesize{Fig 9: Contributions of techniques }
+\end{column}
+\end{columns}
+\end{frame}
+
+% ============================================================
+% SYSTEMS EXPERIENCE SLIDES
+% ============================================================
+\section{Reproduction: The CloudLab Experience}
+
+\begin{frame}[t]{Reproducing Deft: Implementation Challenges}
+\addtobeamertemplate{block begin}{\vspace{-1ex}}{} % Squeeze block top margin
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.48\textwidth}
+\begin{block}{The Setup (Clemson r650)}
+\begin{itemize}
+    \item \hl{Hardware}: Intel Xeon 8360Y, 256GB RAM.
+    \item \hl{NICs}: ConnectX-6 Dx (mlx5\_2) on NUMA 1.
+    \item \hl{Stack}: MLNX\_OFED 4.9 (Experimental Verbs).
+\end{itemize}
+\end{block}
+
+\begin{alertblock}{The "War Story" Bottlenecks}
+\begin{itemize}
+    \item \textbf{IP Instability}: OFED reset cleared IPs on 6/10 nodes.
+    \item \textbf{SSH Fan-out}: Paramiko required RSA PEM keys.
+\end{itemize}
+\end{alertblock}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{exampleblock}{The Critical Fix: Hugepage EFAULT}
+\sys{ibv\_reg\_mr} failed with \texttt{Bad Address}.
+\begin{itemize}
+    \item \hl{Root Cause}: Kernel requires 2MB alignment for \texttt{HUGETLB}.
+    \item \hl{Deft Bug}: 128KB message buffers violated alignment.
+    \item \hl{My Delta}: Added \sys{DISABLE\_HUGEPAGE}.
+\end{itemize}
+\end{exampleblock}
+\end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}[t]{Experimental Results: Clemson vs. Paper}
+\centering
+\vspace{-1ex} % Reduce top gap
+\small
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Mode} & \textbf{Threads} & \textbf{Key Space} & \textbf{Final TP} & \textbf{Final Lat} \\
+\midrule
+Smoke (force HP)   & 2  & 1,000        & 0.274 Mops/s & 7.29 $\mu$s \\
+Mid (force HP)     & 30 & 100,000,000  & 3.676 Mops/s & 8.16 $\mu$s \\
+Big (force HP)     & 60 & 400,000,000  & \hl{6.889 Mops/s} & 8.71 $\mu$s \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3cm}
+
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.48\textwidth}
+\begin{block}{Trend Validation}
+\begin{itemize}
+    \item \pro{Read Ratio}: TP doubles at 100\% (one-sided read is dominant).
+    \item \pro{Zipf Skew}: 0.99 is faster due to \hl{Index Cache warming}.
+\end{itemize}
+\end{block}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{alertblock}{Observations}
+\begin{itemize}
+    \item Absolute numbers are lower than paper (25GbE fabric).
+    \item \textbf{Loading} is slower than \textbf{Running}.
+\end{itemize}
+\end{alertblock}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ============================================================
+% BRIAN'S REPRODUCTION SLIDES (11 IMAGES, 7 SLIDES)
+% ============================================================
+
+% ============================================================
+% BRIAN'S REPRODUCTION SLIDES (FIXED OVERFLOW)
+% ============================================================
+\section{Reproduction Results}
+
+% Slide 11: YCSB-A, B, C Results (Safe Margins)
+\begin{frame}[t]{Experiment Results: YCSB-A, B, and C}
+\begin{columns}[T,onlytextwidth]
+    \begin{column}{0.35\textwidth}
+    \small
+    \begin{itemize}
+        \item \textbf{YCSB-A (50\% R-50\% W)}:
+        \begin{itemize}
+            \item Paper: 42.7 Mops/s
+            \item Ours: 58.4 Mops/s
+        \end{itemize}
+        \item \textbf{YCSB-B (95\% R - 5\% W)}:
+        \begin{itemize}
+            \item Paper: $\sim$90 Mops/s
+            \item Ours: 85.6 Mops/s
+        \end{itemize}
+        \item \textbf{YCSB-C (100\% R -0\% W)}:
+        \begin{itemize}
+            \item Paper: 91.0 Mops/s
+            \item Ours: 92.7 Mops/s
+        \end{itemize}
+    \end{itemize}
+    \vspace{0.2cm}
+    \begin{alertblock}{Observation}
+        \footnotesize Steep upward curve when saturated.
+    \end{alertblock}
+    \end{column}
+    \hfill
+    \begin{column}{0.60\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.4\textheight,keepaspectratio]{images/brian1.png} \\
+        \vspace{0.1cm}
+        \includegraphics[width=\linewidth,height=0.4\textheight,keepaspectratio]{images/brian2.png}
+    \end{column}
+\end{columns}
+\end{frame}
+
+% Slide 12: YCSB-D, E Results (Fixed Bottom Overflow)
+\begin{frame}[t]{Experiment Results: YCSB-D and E}
+\begin{columns}[T,onlytextwidth]
+    \begin{column}{0.35\textwidth}
+    \small
+    \begin{itemize}
+        \item \textbf{YCSB-D (Read Latest)}:
+        \begin{itemize}
+            \item Paper: $\sim$100 Mops/s
+            \item Ours: 105.6 Mops/s
+        \end{itemize}
+        \item \textbf{YCSB-E (Scan Heavy)}:
+        \begin{itemize}
+            \item Paper: $\sim$10 Mops/s
+            \item Ours: $\sim$9 Mops/s
+        \end{itemize}
+    \end{itemize}
+    \vspace{0.2cm}
+    \textbf{\textcolor{VTOrange}{Scan Constraint:}} \\
+    \footnotesize For scan heavy workload, DEFT needs to read the entire leaf node because its unsorted
+    \end{column}
+    \hfill
+    \begin{column}{0.60\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.4\textheight,keepaspectratio]{images/brian3.png} \\
+        \vspace{0.1cm}
+        \includegraphics[width=\linewidth,height=0.4\textheight,keepaspectratio]{images/brian4.png}
+    \end{column}
+\end{columns}
+\end{frame}
+
+% Slide 13: Sensitivity - Keys & Skewness
+\begin{frame}[t]{Robustness Analysis}
+\begin{columns}[T,onlytextwidth]
+    \begin{column}{0.35\textwidth}
+    \begin{exampleblock}{Finding}
+        Robust against \# of keys and skewness
+    \end{exampleblock}
+    \end{column}
+    \hfill
+    \begin{column}{0.60\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.4\textheight,keepaspectratio]{images/brian5.png} \\
+        \vspace{0.1cm}
+        \includegraphics[width=\linewidth,height=0.4\textheight,keepaspectratio]{images/brian6.png}
+    \end{column}
+\end{columns}
+\end{frame}
+
+% Slide 14: Workload Sensitivity
+\begin{frame}[t]{Workload Sensitivity}
+\begin{columns}[T,onlytextwidth]
+    \begin{column}{0.35\textwidth}
+    \small
+    \begin{itemize}
+        \item TP decreases while Write Ratio increases.
+    \end{itemize}
+    \end{column}
+    \hfill
+    \begin{column}{0.60\textwidth}
+        \centering
+        \includegraphics[width=\linewidth,height=0.4\textheight,keepaspectratio]{images/brian7.png} \\
+        \vspace{0.1cm}
+        \includegraphics[width=\linewidth,height=0.4\textheight,keepaspectratio]{images/brian8.png}
+    \end{column}
+\end{columns}
+\end{frame}
+
+% Slide 15: Delete Operation (Safe Single-Column Layout)
+\begin{frame}[t]{The "Delete" Performance Gap}
+\small
+\begin{itemize}
+    \item Deletes are forced to use Exclusive Locks instead of Shared Locks.
+    \item Throughput drop 83.0\% and latency inflate by 492.1\% while Deletes increase up to 20\%
+\end{itemize}
+\centering
+\includegraphics[width=\textwidth,height=0.55\textheight,keepaspectratio]{images/brian9.png}
+\vfill
+\begin{block}{Paper Claim}
+    \footnotesize However, the paper claims that delete operations will not hinder the performance much because they are rare.
+\end{block}
+\end{frame}
+
+% Slide 16: Scalability - CNs (Fixed Horizontal Overflow)
+\begin{frame}[t]{Scalability Analysis: Compute Nodes (CNs)}
+\centering
+\footnotesize
+Threads Scalability \textbullet\ Key Space Index \textbullet\ Workload (Read Ratio) \textbullet\ Skewness (Zipf)
+\vfill
+\includegraphics[width=\textwidth,height=0.75\textheight,keepaspectratio]{images/brian10.png}
+\end{frame}
+
+% Slide 17: Scalability - MNs (Fixed Horizontal Overflow)
+\begin{frame}[t]{Scalability Analysis: Memory Nodes (MNs)}
+\centering
+\footnotesize
+Threads Scalability \textbullet\ Key Space Index
+\vfill
+\includegraphics[width=\textwidth,height=0.75\textheight,keepaspectratio]{images/brian12.png}
+\end{frame}
+
+%------------------------------------------------------------
+% ============================================================
+% PEER REVIEWS & CLASS SENTIMENT
+% ============================================================
+\section{Peer Review Summary}
+
+\begin{frame}[t]{Peer Review Statistics}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.48\textwidth}
+\begin{block}{Overall Sentiment (n=12)}
+    \begin{itemize}
+        \item \pro{Excellent (5/5)}: 8.3\% (1)
+        \item \pro{Very Good (4/5)}: 58.3\% (7)
+        \item \pro{Good (3/5)}: 33.3\% (4)
+    \end{itemize}
+\end{block}
+
+\begin{block}{Prior Knowledge}
+    \begin{itemize}
+        \item Had passing knowledge: 75\%
+        \item Know the area: 25\%
+    \end{itemize}
+\end{block}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{block}{Comprehension Difficulty}
+    \begin{itemize}
+        \item Decent Effort (4/5): 50\%
+        \item Difficult (3/5): 50\%
+    \end{itemize}
+\end{block}
+
+\begin{alertblock}{The Consensus}
+    A high-quality systems paper that is technically dense but effectively justifies its design through motivation experiments.
+\end{alertblock}
+\end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}[t]{Student-Identified Strengths}
+\begin{itemize}
+    \item \hl{Node-Size/Height Tradeoff}: Correctly avoids shrinking logical nodes to prevent tree height growth.
+    \item \hl{Scalable SX Lock}: The shift from exclusive-only loops to shared-mode ticketing is a major win.
+    \item \hl{On-Path Versioning (OPDV)}: Efficiently piggybacks version info onto parent pointers, saving remote reads.
+    \item \hl{Visual Motivation}: Figure 9 ablation study and visual layout of techniques make the claims convincing.
+\end{itemize}
+\end{frame}
+
+\begin{frame}[t]{Student-Identified Weaknesses}
+\begin{itemize}
+    \item \con{Scan Performance}: Hash-based leaves destroy ordering; range queries fetch/sort full nodes with no gain.
+    \item \con{The Delete Penalty}: Exclusive-mode deletes create a bottleneck in high-churn workloads.
+    \item \con{Hardware Coupling}: Reliance on Mellanox-specific masked atomics and on-chip memory limits portability.
+    \item \con{Failure Handling}: "Leaving to future work" underestimates the complexity of crashes during SMOs.
+\end{itemize}
+\end{frame}
+
+
+% ============================================================
+% CLASS DEBATE: THE STUDENT PERSPECTIVE (PART 1)
+% ============================================================
+\section{Class Debate}
+
+\begin{frame}[t]{Discussion: Structure \& Ordering}
+\begin{itemize}
+    \item \textbf{"Will that be a better way to sort all nodes instead of not fully sorted especially for range query scenario? ... Is there a way like update node in background to sort the nodes?"} \\ --- \textit{Cheng-Shun Chuang}
+    \item \textbf{"Do range queries benefit from this approach? If not, is it really worth the added complexity to B+ tree designs vs. prior works?"} \\ --- \textit{Arman Bahraini}
+    \item \textbf{"Is Deft still really a B+Tree at the leaf level? You've replaced sorted leaf arrays with hash tables... It's closer to a B+Hash hybrid."} \\ --- \textit{Yazeed Alharthi}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[t]{Discussion: Performance Trade-offs}
+\begin{itemize}
+    \item \textbf{"It is suspicious that the paper never mentions the aspect of resource utilization anywhere. Just how many operations are delegated to memory node’s compute?"} \\ --- \textit{Sandeep Kollipara}
+    \item \textbf{"Both CHIME and Deft target IO amplification... emphasize different tradeoffs: CHIME focuses on cache usage, Deft on remote granularity. Which tradeoff is more important in practice?"} \\ --- \textit{Hao Li}
+    \item \textbf{"Since this is by the same group... its interesting they chose not to combine HOCL with their SX lock. Would stacking both give even better results?"} \\ --- \textit{Amr Aboelnaga}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[t]{Discussion: Concurrency \& Correctness}
+\begin{itemize}
+    \item \textbf{"We have seen so many approaches to optimize the optimistic synchronization... why don't we try to optimize the lock?"} \\ --- \textit{Chang-Yu Huang}
+    \item \textbf{"Did the authors mean something else by 'ordering' in this context? ... Sherman revealed that RDMA has in order delivery property."} \\ --- \textit{Berkay Inceisci}
+    \item \textbf{"For a system paper, how important is failure handling, given that for practical deployment failure handling often matters more than performance?"} \\ --- \textit{Hao Li}
+\end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}[plain]
+    \begin{center}
+        {\LARGE\textbf{Thank You!}}\\[15pt]
+        {\large Discussion: Does DEFT "Break" the B+Tree abstraction?}
+    \end{center}
+\end{frame}
+
+\end{document}

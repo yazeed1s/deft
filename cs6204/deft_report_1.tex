@@ -1,0 +1,852 @@
+\documentclass[10pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\hypersetup{hidelinks}
+\geometry{a4paper, top=0.75in, bottom=0.75in, left=0.55in, right=0.55in}
+
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10},
+  columns=fullflexible
+}
+
+\title{Reproducing Deft Benchmarks on CloudLab:\\A Systems Experience Report}
+\author{Yazeed Alharthi}
+\date{April 2026}
+
+\begin{document}
+\maketitle
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Introduction}
+% ─────────────────────────────────────────────────────────────────────────────
+
+The goal was to reproduce the benchmarks from the Deft paper~\cite{deft2025eurosys},
+a B$^+$Tree index for disaggregated memory published at EuroSys '25.
+The plan seemed straightforward: deploy the open-source codebase on CloudLab,
+run the YCSB workloads, and compare throughput and latency against the paper's figures.
+
+In practice it took four reservation cycles across two CloudLab clusters,
+spanning March~23 to April~1, 2026, before a single benchmark completed end-to-end.
+Each attempt failed for a different reason, and none of them were obvious from
+reading the README.
+
+This report documents what broke, why, and how it was fixed.
+The full paper-scale experiment (10 CNs, all YCSB workloads) is not done yet.
+What is done is a stable smoke-through-big run on a 1~MN + 2~CN Clemson topology,
+a 12-case read-ratio and Zipf sweep, and a clear picture of what it would take to
+scale further.
+The value in writing this up is not the numbers themselves; it is the debugging
+path and the decisions made along the way.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Background}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{Disaggregated Memory and RDMA}
+
+Deft sits in the disaggregated-memory model: compute nodes run the index logic,
+memory nodes hold the tree pages, and every tree operation is carried out via
+one-sided RDMA reads and writes across the network fabric.
+There is no CPU involvement on the memory side.
+The compute node reaches directly into remote memory using verbs like
+\texttt{RDMA\_READ}, \texttt{RDMA\_WRITE}, and \texttt{RDMA\_CAS}.
+
+This architecture is unforgiving.
+A misconfigured NIC, a wrong GID index, a missing kernel module, or a memory
+region registered against the wrong address does not produce a small slowdown.
+It produces a hang, a segfault, or a silent stall that looks like a network timeout.
+
+\subsection{What Reproduction Actually Requires}
+
+Reading the README gives the dependency list.
+Actually running it reveals the constraints that matter:
+
+\begin{itemize}[nosep]
+  \item \textbf{MLNX\_OFED 4.9 exactly.}
+    Deft calls \texttt{ibv\_exp\_*} (experimental verbs), a Mellanox-proprietary API
+    that ships only with MLNX\_OFED 4.9.
+    Standard \texttt{rdma-core} does not have it.
+    OFED 5.x renamed and restructured the experimental path.
+    There is a narrow version window and no fallback.
+
+  \item \textbf{ConnectX-5 or ConnectX-6.}
+    Deft's lock mechanism uses on-chip device memory on the NIC.
+
+    The \texttt{kLockChipMemSize} constant must be set to match what the
+    specific NIC firmware exposes, or the server aborts at startup.
+
+  \item \textbf{A shared binary path across all nodes.}
+    The orchestration script (\texttt{run\_bench.py}) SSHs into each node and runs
+    \texttt{cd /deft\_code/deft/build \&\& ./server} or \texttt{./client}.
+    If a node has the binary at a different path, the SSH command silently fails
+    to start the process and the benchmark either hangs waiting for a registration
+    that never arrives, or crashes when the client count does not match.
+
+  \item \textbf{memcached as a coordination rendezvous.}
+    On startup, each server and client writes its RDMA queue-pair metadata to
+    a shared memcached instance.
+    If memcached is not running on the right IP, or if the IP in
+    \texttt{memcached.conf} does not match what the node actually has,
+    the process blocks indefinitely in the bootstrap phase.
+
+  \item \textbf{Passwordless SSH from mn0 to all other nodes.}
+    \texttt{run\_bench.py} uses \texttt{paramiko} to fan out process launches.
+    CloudLab gives you SSH access to each node individually using your personal key,
+    but it does not distribute keys between nodes.
+    mn0 cannot reach cn0 without extra setup, and \texttt{paramiko} on Ubuntu 20.04
+    adds its own complication: it rejects OpenSSH-format keys and requires PEM format.
+
+  \item \textbf{Hugepages.}
+    The server allocates the DSM region with \texttt{mmap(..., MAP\_HUGETLB)}.
+    On a fresh CloudLab node, \texttt{vm.nr\_hugepages} is 0.
+    The mmap call fails immediately with \texttt{ENOMEM} and the server exits.
+\end{itemize}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{What the Benchmark Actually Is}
+% ─────────────────────────────────────────────────────────────────────────────
+
+To avoid ambiguity later, this section describes the benchmark based on the actual
+code paths in \texttt{script/run\_bench.py}, \texttt{test/client.cpp},
+and \texttt{test/server.cpp}.
+
+\subsection{Execution Topology and Orchestration}
+
+\texttt{run\_bench.py} reads \texttt{global\_config.yaml}, launches one
+\texttt{server} process on each node in \texttt{servers:}, and one \texttt{client}
+process on each node in \texttt{clients:}.
+Each process is pinned with \texttt{numactl --membind=NUMA --cpunodebind=NUMA}
+and receives \texttt{--rnic\_id}, \texttt{--server\_count}, and \texttt{--client\_count}.
+After all processes finish, the script parses only \texttt{client\_0.log} and
+records \texttt{Loading Results} and \texttt{Final Results}.
+
+\subsection{Workload Profiles}
+
+The built-in modes are:
+\begin{itemize}[nosep]
+  \item \texttt{smoke}: 1 thread, 1K keys, read\_ratio=50, Zipf=0.99.
+  \item \texttt{small}: 5 threads, 10M keys, read\_ratio=50, Zipf=0.99.
+  \item \texttt{mid}: 15 threads, 100M keys, read\_ratio=50, Zipf=0.99.
+  \item \texttt{big}: 30 threads, 400M keys, read\_ratio=50, Zipf=0.99.
+\end{itemize}
+Prefill thread count is asymmetric: smoke sets prefill threads equal to bench threads,
+while all other modes fix prefill at 30 regardless of bench thread count.
+
+\subsection{What Each Client Thread Does}
+
+Each client process runs up to \texttt{max(num\_prefill\_threads, num\_bench\_threads)}
+threads across four phases:
+
+\begin{itemize}[nosep]
+  \item \textbf{Phase 0 (bootstrap):} client 0 inserts 1M initial keys;
+    all clients synchronize on a \texttt{Barrier("benchmark")}.
+  \item \textbf{Phase 1 (prefill):} active threads partition the key space,
+    shuffle locally, and insert until \texttt{prefill\_ratio * key\_space}
+    (default 1.0). This phase produces the \texttt{Loading Results} line.
+  \item \textbf{Phase 2 (warmup):} each bench thread runs 1M operations.
+  \item \textbf{Phase 3 (measured run):} each bench thread runs 10M operations.
+    Each operation is either a \texttt{tree->search} or \texttt{tree->insert},
+    sampled by \texttt{read\_ratio}.
+    Keys come from a Zipf sampler transformed as
+    \texttt{key = CityHash64(k) \% key\_space + 1}.
+\end{itemize}
+
+\subsection{Metrics}
+
+Throughput is summed across all bench threads per client, then across clients via
+\texttt{DSMClient::Sum}, and reported in Mops/s.
+Latency is sampled one-in-32 operations (\texttt{MEASURE\_SAMPLE=32}),
+averaged, and reported in microseconds.
+This is a mixed read/insert microbenchmark on Deft's RDMA tree.
+It does not test durability, deletes, or transactions.
+
+\subsection{What I Added}
+
+The full fork is available at \url{https://github.com/yazeed1s/deft}.
+The delta from the upstream Deft repo is 89 files changed,
+8195 insertions, and 3313 deletions.
+The main additions were:
+
+\begin{itemize}[nosep]
+  \item \textbf{Two memory modes} in the benchmark driver:
+    default (\texttt{DEFT\_DISABLE\_HUGEPAGE=1}) that bypasses hugetlb,
+    and force (\texttt{DEFT\_FORCE\_HUGEPAGE=1}) that uses it with correct
+    2\,MB alignment and pre-fault page touching.
+    This was the key instrumentation that let me isolate the mmap failure path.
+
+  \item \textbf{NUMA-local hugepage validation} in \texttt{run\_bench.py}:
+    checks node-local free hugepages rather than just the global
+    \texttt{vm.nr\_hugepages} before launching in force mode.
+    Global counts can look fine while a specific NUMA node is exhausted.
+
+  \item \textbf{Caller-tagged MR logs} inside the RDMA registration path:
+    each \texttt{ibv\_reg\_mr} call logs its caller (message/cache/dsm/lock),
+    address, size, and errno.
+    Without this, all you see is that registration failed somewhere.
+
+  \item \textbf{Parameterized sweeps} via CLI: overrides for threads,
+    key space, read ratio, Zipf, and prefill ratio so experiments are
+    reproducible without editing source files.
+
+  \item \textbf{Six cluster scripts}:
+    \texttt{cloudlab\_setup.sh} (mn0 bring-up),
+    \texttt{cloudlab\_rebuild.sh} (fast rebuild after code edits),
+    \texttt{install\_rdma\_drivers.sh} (OFED install with retry logic),
+    \texttt{mount\_deft\_code.sh} (NFS export and mount across all nodes),
+    \texttt{link\_cluster.sh} (runs locally; installs mn0 pubkey on all CNs),
+    and \texttt{net\_heal.sh} (re-applies experiment-LAN IPs after OFED resets them).
+\end{itemize}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Experimental Setup}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{CloudLab Constraints}
+
+CloudLab provides bare-metal nodes, but provisioning is rigid.
+\texttt{profile.py} is a one-shot: once an experiment starts, you cannot change
+the profile.
+If the profile has a bug, the only option is to terminate, wait for nodes to
+become available again, and re-reserve.
+RDMA-capable node types (\texttt{d6515}, \texttt{r650}, \texttt{c6525-100g})
+are always in demand, and the wait between reservation cycles ranged from
+a few hours to over a day.
+Getting \texttt{profile.py} to a working state took eleven iterations across
+the four attempts; the version that finally held is tagged as v11 in the
+fork at \url{https://github.com/yazeed1s/deft}.
+
+Ubuntu 20.04 on CloudLab nodes runs \texttt{unattended-upgrades} on first boot,
+holding the \texttt{dpkg} frontend lock for several minutes.
+Any \texttt{apt-get} call in a profile boot script that runs during this window
+fails with \texttt{E: Could not get lock /var/lib/dpkg/lock-frontend} and exits.
+The node appears provisioned in the CloudLab UI, but it is not.
+
+\subsection{Hardware Used}
+
+\textbf{Utah, attempts 1 and 2:} \texttt{d6515} nodes (AMD EPYC 7452, 128\,GB RAM,
+dual ConnectX-5 25\,GbE).
+
+\textbf{Clemson, attempts 3 and 4:} \texttt{r650} nodes (Intel Xeon Platinum 8360Y
+at 2.40\,GHz, dual-socket, 256\,GB DDR4-3200 RAM).
+Each node has two NICs: a ConnectX-5 pair (\texttt{eno12399}/\texttt{eno12409})
+attached to NUMA 0, and a ConnectX-6 Dx pair (\texttt{ens2f0}/\texttt{ens2f1})
+attached to NUMA 1.
+\texttt{ibdev2netdev} maps these to \texttt{mlx5\_0} and \texttt{mlx5\_1}
+(ConnectX-5) and \texttt{mlx5\_2} and \texttt{mlx5\_3} (ConnectX-6 Dx).
+This two-NIC layout turned out to matter for both RDMA device selection and
+NUMA alignment, and getting it wrong in the config caused silent failures.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Implementation and Attempts}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{First Attempt: Utah, 3 Nodes (March 23--24)}
+
+This attempt failed before any Deft code ran.
+The problem was entirely in \texttt{profile.py}.
+
+The profile assigned static IPs to the experiment-LAN interfaces by calling
+
+\texttt{iface.addAddress(pg.IPv4Address("10.10.1.x", "255.255.255.0"))}.
+CloudLab silently ignores static IP assignments on shared LAN interfaces: it manages
+those addresses itself and assigns \texttt{10.10.1.1}, \texttt{10.10.1.2}, and so on
+in the order nodes are added to the LAN object.
+The result was that the experiment-LAN interface came up on two of the three nodes
+with no address at all.
+\texttt{ibv\_devinfo} showed a valid RDMA device, so the NIC looked fine.
+But \texttt{ping 10.10.1.2} from mn0 failed with ``no route to host'' because
+the interface had no IP to route from.
+
+The second mistake was setting both \texttt{lan.link\_multiplexing = True} and
+\texttt{lan.vlan\_tagging = True}.
+On Utah hardware this creates a shared VLAN rather than a dedicated L2 segment.
+The result was inconsistent: some node pairs could ping each other and others could not,
+depending on how the switch fabric assigned the VLAN tag.
+The failure was non-reproducible across nodes, which made it look like an RDMA
+configuration issue rather than a network topology one.
+
+I spent several hours checking GID tables and port states before logging the actual
+interface state and seeing that \texttt{10.10.1.x} was simply absent.
+The CloudLab UI shows a node as ``ready'' as soon as cloud-init exits with 0,
+regardless of whether the network is configured correctly.
+There is no way to know from the UI; you have to log in and check manually.
+
+Two rules came out of this attempt: never assign static IPs on LAN interfaces in
+CloudLab, and never use \texttt{link\_multiplexing} for RDMA workloads.
+
+\subsection{Second Attempt: Utah, 6 Nodes (March 24--27)}
+
+With the profile fixed (static IPs removed, \texttt{link\_multiplexing} and
+\texttt{vlan\_tagging} set to \texttt{False}) nodes came up with correct
+\texttt{10.10.1.x} addresses.
+A new set of problems appeared.
+
+\subsubsection{dpkg Lock and Partial Package Installation}
+
+The profile's \texttt{common\_setup} script ran \texttt{apt-get update} and then
+\texttt{apt-get install} during cloud-init.
+On a fresh Ubuntu 20.04 node, \texttt{unattended-upgrades} holds the dpkg frontend
+lock at boot for anywhere from 3 to 12 minutes.
+The cloud-init script hit the lock on three of the six nodes, printed
+\texttt{E: Could not get lock /var/lib/dpkg/lock-frontend}, and exited with code 1.
+The nodes showed as provisioned in the UI, but \texttt{nfs-common} was missing on
+those three nodes, so the NFS mount step timed out silently: the loop waiting
+for \texttt{showmount -e mn0} spun for its full 5-minute window and gave up.
+
+This is why I wrote \texttt{cloudlab\_catchup.sh}: a script that runs on mn0
+after login and replays all the setup steps that cloud-init was supposed to do.
+It clears the dpkg lock explicitly before any \texttt{apt-get} call, installs
+missing packages with retry logic, exports and mounts NFS, downloads and installs
+MLNX\_OFED 4.9, and builds Deft.
+Running it on the three broken nodes fixed the package state within about 20 minutes.
+
+\subsubsection{SSH Fan-Out Failure: Key Format}
+
+With packages fixed, \texttt{run\_bench.py} still could not connect to the CNs.
+The error from \texttt{paramiko} was:
+\begin{lstlisting}
+paramiko.ssh_exception.SSHException: not a valid RSA private key file
+\end{lstlisting}
+The key at \texttt{\textasciitilde/.ssh/id\_rsa} on mn0 was in OpenSSH format
+(\texttt{-----BEGIN OPENSSH PRIVATE KEY-----}), which is the default for
+\texttt{ssh-keygen} on modern Ubuntu.
+\texttt{paramiko} on Ubuntu 20.04 requires PEM format
+(\texttt{-----BEGIN RSA PRIVATE KEY-----}).
+Regenerating with \texttt{ssh-keygen -m PEM} fixed the parsing error.
+
+\subsubsection{SSH Fan-Out Failure: Key Not Distributed}
+
+Fixing the key format exposed the next problem: even with a valid PEM key,
+\texttt{paramiko} was getting
+
+\texttt{AuthenticationException} on every CN.
+CloudLab distributes your personal public key to all nodes so you can SSH in
+from your laptop.
+It does not distribute keys between nodes.
+mn0's public key was not in any CN's \texttt{authorized\_keys}.
+
+The fix was \texttt{link\_cluster.sh}, a script that runs from my local machine.
+It SSHs into mn0 using my personal key (which works from my machine to any node),
+generates an RSA PEM keypair on mn0, reads the public key back, then SSHs into
+each CN and appends that key to \texttt{authorized\_keys}.
+Because the script runs from my local machine, it can reach all nodes without the
+bootstrapping problem.
+After running it, mn0 could SSH into all CNs without interaction.
+
+\subsubsection{Hugepage Allocation Failure}
+
+With SSH working, the server process started, registered with memcached,
+and then crashed with:
+\begin{lstlisting}
+mmap(size=66588770304, MAP_HUGETLB) failed: Cannot allocate memory
+\end{lstlisting}
+The DSM region in \texttt{DSMKeeper::initRDMAConnection} uses \texttt{MAP\_HUGETLB}
+to back a 62\,GB allocation.
+On a fresh CloudLab node, \texttt{vm.nr\_hugepages} is 0.
+With no hugepages reserved in the kernel pool, any \texttt{mmap(..., MAP\_HUGETLB)}
+call fails immediately with \texttt{ENOMEM} regardless of how much RAM is available.
+Running \texttt{all\_hugepage.py} from the Deft scripts on all nodes reserved
+enough hugepages and the server started.
+
+With hugepages working, the server started cleanly and clients connected through
+memcached.
+But after QP bring-up, clients stalled.
+They had valid queue pairs: \texttt{ibv\_devinfo} showed active ports and GIDs
+looked correct, but no operations completed.
+After about an hour with no clear error, my best reading of the situation was
+that the d6515 nodes' ConnectX-5 25\,GbE driver configuration was not exercising
+the \texttt{ibv\_exp\_*} code path that Deft requires; the verbs stack was present
+but the experimental extensions were either stubbed out or compiled differently
+on that firmware version.
+With no error code to work from, continuing to debug on the same hardware was
+not going to produce a clear signal.
+I moved to Clemson.
+
+\subsection{Third Attempt: Clemson, 10 Nodes (March 28--30)}
+
+I switched to Clemson \texttt{r650} nodes for two reasons: the 100\,GbE ConnectX-6 Dx
+NIC is closer to the paper's 100\,Gbps setup, and the dual-socket 256\,GB
+configuration leaves more headroom for hugepage allocation.
+I reserved 10 nodes (1 MN + 9 CNs) to get closer to paper scale.
+
+\texttt{cloudlab\_catchup.sh} ran cleanly on all nodes.
+SSH fan-out worked.
+Hugepages were reserved.
+The server and clients started and completed QP initialization.
+This was the first time the system initialized end-to-end without crashing at startup.
+But the benchmark itself failed on every attempt.
+
+\subsubsection{Experiment-LAN IP Disappears After OFED Install}
+
+After OFED 4.9 was installed and \texttt{openibd} was restarted,
+the experiment-LAN IP disappeared from the NIC interface on 6 of the 10 nodes.
+Running \texttt{ip addr show} on an affected node showed the Mellanox interface
+with no IPv4 address.
+The \texttt{10.10.1.x} address that CloudLab had assigned was simply gone.
+
+The most likely explanation is that the OFED installer replaces the kernel network
+driver for the Mellanox NIC, which triggers a link-down/link-up cycle on the
+interface.
+On Ubuntu 18.04 with Netplan, a link reset causes the interface to reinitialize
+without reapplying its previous address, because that address was set by
+CloudLab's boot scripts via a transient \texttt{ip addr add} rather than
+persisted in a Netplan configuration file.
+After the link resets, the address does not come back.
+The fact that only 6 of the 10 nodes were affected points to a firmware version
+difference within the reservation: nodes where the OFED installer detected a
+driver update triggered the link reset, while nodes already running a compatible
+driver skipped that step and kept their address.
+
+This meant that after every OFED install or \texttt{openibd} restart,
+affected nodes were unreachable on the experiment LAN.
+I wrote \texttt{net\_heal.sh} to detect and fix this: it identifies the Mellanox
+experiment interface via \texttt{ibdev2netdev}, looks up the expected IP from the
+node's short hostname, and re-applies it with \texttt{ip addr add}.
+
+\begin{lstlisting}[language=bash]
+RDMA_IFACE=$(sudo ibdev2netdev | head -n 1 | awk '{print $5}')
+sudo ip link set dev "$RDMA_IFACE" up
+sudo ip addr add "$TARGET_IP/24" dev "$RDMA_IFACE"
+\end{lstlisting}
+
+At 10 nodes, running \texttt{net\_heal.sh} manually after every driver event
+was not sustainable.
+Between rebalancing hugepages, restarting \texttt{openibd} for config changes,
+and the occasional CloudLab network event, there was always at least one node in
+a broken state.
+After two failed full-cluster runs where 3 to 5 nodes were unreachable at
+launch time, I reduced scope to 1 MN + 2 CN and ran a strict hypothesis-driven
+loop with complete instrumentation on every step.
+
+\subsection{Fourth Attempt: Clemson, Minimal Topology (March 31--April 1)}
+
+With only three nodes to manage, the IP instability became tractable: run
+\texttt{net\_heal.sh} before every launch, verify \texttt{ip addr show} on all
+three nodes, then proceed.
+The approach this time was one variable changed per run, full logs captured
+for every attempt.
+
+\subsubsection{Starting Point}
+
+The initial run on March 31 used the command:
+\begin{lstlisting}
+python3 run_bench.py --smoke
+\end{lstlisting}
+on a 1-server (\texttt{10.10.1.1}) + 2-client (\texttt{10.10.1.2}, \texttt{10.10.1.3})
+topology.
+Preflight hugepage checks passed.
+The server exited with code 135 and both clients printed:
+\begin{lstlisting}
+The RNIC has 128KB device memory
+Memory registration failed
+\end{lstlisting}
+This told me two things immediately.
+First, RDMA device discovery was working: the NIC was found, enumerated, and its
+device memory size was readable.
+Second, the failure was in the MR registration path (\texttt{ibv\_reg\_mr}),
+not in basic connectivity or QP creation.
+That ruled out a whole class of network-level problems.
+
+\subsubsection{Initial Hypotheses and Why They Were Wrong}
+
+\textbf{Memlock limit.}
+The first guess was that \texttt{ibv\_reg\_mr} was hitting the process memlock ceiling.
+Checked on all three nodes:
+\begin{lstlisting}
+ulimit -l
+cat /proc/self/limits | grep -i "Max locked memory"
+\end{lstlisting}
+All nodes showed \texttt{unlimited}.
+Not the cause.
+
+\textbf{Hugepage availability.}
+The second guess was that the preflight check was passing on stale counts while
+the pool was actually empty by the time registration ran.
+Checking \texttt{/proc/meminfo} directly showed the server had 32768 hugepages
+free and each client had 1024.
+The pool was not empty.
+
+Both hypotheses assumed resource exhaustion.
+The actual problem turned out to be address validity, which is a different layer
+entirely.
+
+\subsubsection{Instrumentation Phase}
+
+Rather than keep guessing, I added explicit logging to every RDMA path that
+touches MR registration:
+
+\begin{itemize}[nosep]
+  \item \texttt{src/rdma/Resource.cpp}: device selection, chosen index and name,
+    port state, MTU, GID, and for every \texttt{ibv\_reg\_mr} call: the caller name,
+    base address, size, access flags, exact \texttt{errno}, and \texttt{strerror}.
+  \item \texttt{src/rdma/StateTrans.cpp}: QP state transitions (INIT/RTR/RTS)
+    with errors.
+  \item \texttt{src/rdma/Utility.cpp}: device memory capability logging.
+  \item \texttt{src/ThreadConnection.cpp} and \texttt{src/DirectoryConnection.cpp}:
+    constructor diagnostics including MR keys and QP IDs.
+  \item \texttt{test/client.cpp} and \texttt{test/server.cpp}:
+    explicit print of NUMA ID and RNIC ID at startup.
+  \item \texttt{script/run\_bench.py}:
+    print the exact remote command line used to launch each server and client.
+\end{itemize}
+
+With this in place, the logs from the next run showed:
+
+\begin{lstlisting}
+RDMA createContext: succeeded
+selected device: mlx5_2 (index 3 in verbs list)
+GID: ::ffff:10.10.1.1  [resolved correctly]
+QP creation: succeeded
+[caller=cache] ibv_reg_mr: addr=0x7f3b20000000 size=1073741824 flags=0x1f errno=14 (Bad address)
+\end{lstlisting}
+
+\texttt{errno 14} is \texttt{EFAULT}: the kernel rejected the address range as
+invalid for pinning.
+This was not a permissions problem, not a size problem, and not a network problem.
+It was the kernel saying this virtual address range is not something it can pin.
+
+\subsubsection{Hypothesis: Wrong RNIC or GID}
+
+The r650 nodes have four RDMA devices.
+\texttt{mlx5\_0} and \texttt{mlx5\_1} are the ConnectX-5 ports on NUMA 0;
+\texttt{mlx5\_2} and \texttt{mlx5\_3} are the ConnectX-6 Dx ports on NUMA 1.
+The logs confirmed that \texttt{mlx5\_2} was active, its GID resolved to the
+correct \texttt{10.10.1.x} address, and QP creation and transition to RTS succeeded.
+RNIC and GID selection were not the problem.
+
+\subsubsection{Hypothesis: MR Access Flags}
+
+I isolated the failing MR by adding configurable access flags per registration site.
+The 1\,GB cache buffer MR was using the full flag set
+
+(\texttt{IBV\_ACCESS\_LOCAL\_WRITE | IBV\_ACCESS\_REMOTE\_READ |
+IBV\_ACCESS\_REMOTE\_WRITE |
+IBV\_ACCESS\_REMOTE\_ATOMIC}).
+I changed the message-buffer MR to local-write only (\texttt{IBV\_ACCESS\_LOCAL\_WRITE})
+to eliminate any issue with remote-atomic permissions.
+The logs confirmed the change:
+\begin{lstlisting}
+[caller=message] ibv_reg_mr: addr=0x... size=131072 flags=0x1 errno=14 (Bad address)
+\end{lstlisting}
+Same \texttt{EFAULT}.
+Access flags were not the cause.
+
+\subsubsection{Hypothesis: NUMA Mismatch}
+
+Running \texttt{numactl -H} and checking
+\texttt{/sys/class/infiniband/mlx5\_*/device/numa\_node}
+confirmed that \texttt{mlx5\_2} is on NUMA 1 on r650.
+The server and clients were running on NUMA 0 by default, meaning all MR
+registrations crossed a socket boundary.
+I aligned both to NUMA 1 by setting \texttt{numa\_id=1} and \texttt{rnic\_id=2}
+in \texttt{global\_config.yaml} and patching \texttt{gen\_config.py} to default
+to these values on this platform.
+
+NUMA alignment improved stability and eliminated cross-socket latency variance,
+but the MR registration failure persisted.
+The \texttt{EFAULT} on the message buffer was still there.
+NUMA mismatch was a contributing factor but not the root cause.
+
+\subsubsection{Root Cause: Hugetlb Address Alignment}
+
+At this point the pattern was clear: \texttt{EFAULT} on MR registration,
+reproducible across different callers (cache buffer, message buffer), independent
+of access flags, independent of NUMA alignment.
+The one thing all the failing allocations had in common was \texttt{MAP\_HUGETLB}
+in the allocator.
+
+The kernel's hugetlb subsystem requires both the base address and the size of an
+\texttt{mmap} region to be aligned to the hugepage granularity (2\,MB for the
+standard 2\,MB page size).
+It also requires the virtual address range to be backed by actual hugepage frames
+before the region can be pinned for DMA.
+If either condition fails (misaligned address, misaligned size, or pages not yet
+faulted in) the kernel returns \texttt{EFAULT} from \texttt{ibv\_reg\_mr} even if
+the address looks valid from userspace.
+
+The message buffer in Deft was allocated at 128\,KB, well below 2\,MB, and was
+not guaranteed to be aligned to a 2\,MB boundary.
+Under normal anonymous pages this is fine.
+Under \texttt{MAP\_HUGETLB} the kernel rejects it.
+
+The fix was to introduce a runtime-controllable hugepage mode in
+\texttt{include/HugePageAlloc.h}: if
+
+\texttt{DEFT\_DISABLE\_HUGEPAGE=1} is set,
+allocations use normal anonymous pages instead of \texttt{MAP\_HUGETLB}.
+I also added a fallback path so that if a hugetlb \texttt{mmap} fails for any reason,
+the allocator silently retries with normal pages.
+Both the server and client launch commands in \texttt{run\_bench.py} were updated
+to include this environment variable by default.
+
+The smoke benchmark completed end-to-end immediately:
+\begin{lstlisting}
+Loading Results  TP: 0.199 Mops/s  Lat: 10.049 us
+Final Results    TP: 0.272 Mops/s  Lat: 7.333 us
+\end{lstlisting}
+This was the first successful end-to-end run.
+
+\subsubsection{Force-Hugepage Path and the Second Failure}
+
+With default mode stable, I wanted to validate that hugetlb could also work with
+the correct alignment fixes applied rather than being bypassed entirely.
+I introduced \texttt{DEFT\_FORCE\_HUGEPAGE=1}, which keeps \texttt{MAP\_HUGETLB}
+but rounds all allocation sizes up to 2\,MB and touches every page before MR
+registration to ensure frames are faulted in and ready to pin.
+I also added NUMA-local hugepage validation in \texttt{run\_bench.py}: before
+launching in force mode, the script checks
+\texttt{/sys/devices/system/node/node1/hugepages/hugepages-2048kB/free\_hugepages}
+rather than global \texttt{vm.nr\_hugepages}, because the global count can look
+adequate while node 1's local pool is exhausted.
+
+Force-hugepage smoke completed successfully with numbers essentially identical to
+default mode (0.274 Mops/s), confirming the fix was correct.
+
+Scaling up to \texttt{--big} then exposed an independent failure: both clients
+exited with code 139 (segfault).
+The logs showed MR registration succeeding for multiple thread connections before
+the crash, meaning the process got much further than before.
+The cause was a compile-time thread cap: the \texttt{MAX\_APP\_THREAD} constant
+had been lowered during earlier debugging and not restored.
+The \texttt{--big} mode uses 30 prefill and 30 bench threads, which exceeded the
+array bounds sized by \texttt{MAX\_APP\_THREAD} and caused an out-of-bounds write.
+Restoring \texttt{MAX\_APP\_THREAD} to 32 fixed the segfault and \texttt{--big}
+completed cleanly.
+
+\subsubsection{Final Working Configuration}
+
+The stable configuration on Clemson is:
+\begin{itemize}[nosep]
+  \item 1 server (\texttt{mn0}, \texttt{10.10.1.1}),
+    2 clients (\texttt{cn0}/\texttt{cn1}, \texttt{10.10.1.2}/\texttt{10.10.1.3})
+  \item \texttt{numa\_id=1}, \texttt{rnic\_id=2} (\texttt{mlx5\_2}, ConnectX-6 Dx)
+    on all nodes
+  \item Default mode: \texttt{DEFT\_DISABLE\_HUGEPAGE=1} (normal anonymous pages)
+  \item Force mode: \texttt{DEFT\_FORCE\_HUGEPAGE=1} with 2\,MB-aligned allocations,
+    pre-fault page touching, and NUMA-local free-hugepage preflight
+  \item \texttt{MAX\_APP\_THREAD=32} confirmed before any run with more than 16 threads
+\end{itemize}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Benchmark Results and Analysis}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{Core Runs}
+
+Table~\ref{tab:core} shows the four main benchmark runs after the configuration
+was stabilized.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Core benchmark results on Clemson r650 (1 MN + 2 CN).}
+\label{tab:core}
+\begin{tabular}{lrrrr}
+\toprule
+Mode & Total Threads & Key Space & Loading TP / Lat & Final TP / Lat \\
+\midrule
+Smoke (disable HP) & 2  & 1,000       &
+  0.199 Mops/s / 10.049\,\textmu{}s & 0.272 Mops/s / 7.333\,\textmu{}s \\
+Smoke (force HP)   & 2  & 1,000       &
+  0.198 Mops/s / 10.088\,\textmu{}s & 0.274 Mops/s / 7.299\,\textmu{}s \\
+Mid (force HP)     & 30 & 100,000,000 &
+  4.942 Mops/s / 12.154\,\textmu{}s & 3.676 Mops/s / 8.164\,\textmu{}s \\
+Big (force HP)     & 60 & 400,000,000 &
+  4.753 Mops/s / 12.658\,\textmu{}s & 6.889 Mops/s / 8.711\,\textmu{}s \\
+\bottomrule
+\end{tabular}
+\end{table}
+\noindent\footnotesize
+  Smoke runs: March 31, 2026.
+  Force-hugepage mid/big runs: April 1, 2026.
+\normalsize
+\vspace{4pt}
+
+The two smoke rows are nearly identical (0.272 vs.\ 0.274 Mops/s).
+At 1K keys the entire working set fits in the CN-side index cache, so the memory
+allocation path is not exercised meaningfully.
+The equality of the two modes at this scale confirms the hugetlb fix is correct:
+force-hugepage mode is now functionally equivalent to default mode for small working sets.
+
+For the mid and big runs, throughput is lower during loading than during the final
+measured phase.
+Loading inserts keys in sequential order across threads, which causes frequent
+structural modification operations (SMOs) in Deft's leaf nodes.
+The final phase uses Zipf-distributed keys, so a small hot set stays in the index
+cache and most operations hit cached paths with fewer round trips.
+
+The big run (60 threads, 400M keys) achieves 6.889 Mops/s in the final phase,
+which works out to roughly 0.115 Mops/s per thread.
+The paper's Figure 8 YCSB-A result for Deft at around 50 threads is in the
+0.2 to 0.3 Mops/s per thread range.
+The gap is expected: this setup uses 25\,GbE (ConnectX-6 Dx at its negotiated
+speed on the Clemson fabric), 2 CNs instead of 10, and no CN-side cache warming
+across multiple nodes.
+The trend direction is consistent with the paper.
+
+\subsection{Workload Sweep}
+
+Table~\ref{tab:sweep} shows the 12-case sweep over read ratios and Zipf parameters.
+All 12 runs completed successfully (12/12 ok).
+
+\begin{table}[h]
+\centering
+\small
+\caption{Read-ratio and Zipf sweep. All runs in force-hugepage mode, Clemson r650.}
+\label{tab:sweep}
+\begin{tabular}{lrrr}
+\toprule
+Case & Final TP (Mops/s) & Final Lat (\textmu{}s) & Elapsed (s) \\
+\midrule
+mid,  rr=0,   z=0.00 & 2.685  & 11.199 & 165.80 \\
+mid,  rr=0,   z=0.99 & 2.733  & 10.987 & 163.82 \\
+mid,  rr=50,  z=0.00 & 3.617  &  8.314 & 133.78 \\
+mid,  rr=50,  z=0.99 & 3.675  &  8.181 & 133.79 \\
+mid,  rr=100, z=0.00 & 5.559  &  5.425 & 101.66 \\
+mid,  rr=100, z=0.99 & 5.635  &  5.355 & 101.68 \\
+big,  rr=0,   z=0.00 & 5.048  & 11.908 & 237.84 \\
+big,  rr=0,   z=0.99 & 5.171  & 11.622 & 235.76 \\
+big,  rr=50,  z=0.00 & 6.722  &  8.946 & 205.73 \\
+big,  rr=50,  z=0.99 & 6.909  &  8.683 & 203.81 \\
+big,  rr=100, z=0.00 & 10.147 &  5.923 & 173.78 \\
+big,  rr=100, z=0.99 & 10.395 &  5.793 & 171.86 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Going from read ratio 0 to 100 roughly doubles throughput and halves latency.
+A read in Deft is a one-sided RDMA read of one bucket pair (128 bytes after the
+hash-based leaf fix).
+A write involves acquiring the one-sided SX lock, finding an empty slot, and writing
+back via RDMA\_CAS: more round trips and more contention.
+
+Zipf=0.99 is consistently slightly faster than uniform at every point.
+Deft's compute nodes maintain a size-limited index cache for internal nodes.
+Under Zipf, a small set of hot keys concentrates all traffic through a few internal
+node paths that stay warm in the cache and avoid remote reads for every traversal.
+Under uniform, cache hit rate is lower and more internal nodes get fetched over
+the network on each operation.
+The paper makes the same observation in Section 5.2 when comparing SMART's behavior
+under skewed versus uniform workloads.
+
+The sweep is single-shot per point so variance is not characterized.
+These numbers show trend direction, not confidence-interval results.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Lessons Learned}
+% ─────────────────────────────────────────────────────────────────────────────
+
+Four attempts across two clusters produced four distinct failure classes.
+Looking across them together, three patterns stand out that are not visible
+inside any single attempt.
+
+\textbf{Provisioning and benchmarking are separate problems.}
+Attempts 1 and 2 failed entirely at the infrastructure layer (wrong profile,
+broken packages, missing keys) before a single line of Deft code ran.
+Getting \texttt{profile.py} to a working state took eleven iterations; the version
+that finally held is tagged as v11 in the fork at \url{https://github.com/yazeed1s/deft}.
+Each iteration cost a full reservation cycle: terminate the experiment, wait for
+nodes, re-reserve, re-provision.
+The instinct is to treat setup as solved once it mostly works and move on to the
+benchmark.
+That instinct is wrong on CloudLab.
+A node that shows ``ready'' in the UI can have no experiment-LAN address, no OFED
+stack, no hugepages, and no SSH trust to its neighbors.
+The only reliable fix is a verification script that checks every prerequisite
+explicitly and refuses to proceed if anything is missing.
+\texttt{cloudlab\_catchup.sh} plus \texttt{link\_cluster.sh} filled that role here,
+but they should have existed from the start.
+
+\textbf{Successful context creation does not imply a working RDMA path.}
+This was the core mistake in the hypothesis loop during attempt 4.
+\texttt{ibv\_devinfo} showed an active port.
+GID resolution succeeded.
+QP creation and transition to RTS succeeded.
+None of that predicted whether \texttt{ibv\_reg\_mr} would work.
+Memory registration lives at the intersection of the kernel's hugetlb subsystem,
+IOMMU state, NUMA topology, and the RDMA driver's pinning path: a layer below
+everything the verbs API surface makes visible.
+The right instrumentation for this class of failure is caller-tagged MR logs
+with address, size, flags, and errno on every registration call, not device-level
+checks.
+
+\textbf{Each fix reveals the next independent failure.}
+In attempt 4 alone: fixing RNIC selection revealed the MR \texttt{EFAULT}.
+Fixing the \texttt{EFAULT} via \texttt{DEFT\_DISABLE\_HUGEPAGE} revealed the
+\texttt{MAX\_APP\_THREAD} segfault on \texttt{--big}.
+Fixing \texttt{MAX\_APP\_THREAD} completed the run.
+In attempt 3, fixing SSH key distribution revealed the hugepage mmap crash.
+This layering is expected in systems software but easy to misread as things
+continuously breaking rather than forward progress being made.
+The right mental model is a pipeline: each stage only becomes observable
+once the stage before it passes.
+
+One thing that still does not have a clean explanation: why the experiment-LAN IP
+disappears on some Clemson nodes after \texttt{openibd} restarts but not others
+on the same reservation.
+The best guess is a firmware version split within the reservation causing different
+installer behavior on the driver reset, but this has not been confirmed.
+The \texttt{net\_heal.sh} workaround is reliable regardless.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Future Work}
+% ─────────────────────────────────────────────────────────────────────────────
+
+With setup stable, the next phase is robustness and limit-finding rather than
+bring-up.
+
+\begin{enumerate}[nosep]
+  \item \textbf{Quantify variance.}
+    Run the 12-point sweep with 5 to 10 repeats and report median and p95.
+    Single-shot results are trend data at best.
+
+  \item \textbf{Find the failure boundary.}
+    Push thread count, write ratio, and run duration until something breaks,
+    then classify the failure signature.
+    The most likely failure mode is lock contention under skewed write-heavy
+    workloads at high thread counts, which the paper addresses but has not been
+    verified on this hardware.
+
+  \item \textbf{Scale to paper topology.}
+    Reaching 10 CNs with the IP instability under control requires running
+    \texttt{net\_heal.sh} as a pre-launch step on every node via \texttt{paramiko},
+    not manually.
+    The orchestration script needs a health-check phase before it launches processes.
+
+  \item \textbf{Controlled fault cases.}
+    Run with deliberate misconfigurations (wrong NUMA, wrong RNIC, exhausted
+    NUMA-local hugepages) and document the exact failure signature for each.
+    This would make the setup guide useful for someone starting from scratch.
+
+  \item \textbf{Compare throughput-vs-threads shape to paper.}
+    The paper's Figure 8 shows a throughput curve as thread count scales.
+    Reproducing the shape of that curve (not the absolute numbers, which will differ
+    given the hardware gap) is the right goal for a partial reproduction
+    on constrained hardware.
+\end{enumerate}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{thebibliography}{2}
+
+\bibitem{deft2025eurosys}
+J.~Wang, Q.~Wang, Y.~Zhang, and J.~Shu,
+``Deft: A Scalable Tree Index for Disaggregated Memory,''
+in \emph{Proc.\ EuroSys '25}, Rotterdam, Netherlands, 2025, pp.~886--901.
+
+\bibitem{sherman}
+Q.~Wang, Y.~Lu, and J.~Shu,
+``Sherman: A Write-Optimized Distributed B$^+$Tree Index on Disaggregated Memory,''
+in \emph{Proc.\ SIGMOD '22}, Philadelphia, PA, USA, 2022, pp.~1033--1048.
+
+\end{thebibliography}
+
+\end{document}

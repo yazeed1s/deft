@@ -1,0 +1,347 @@
+\documentclass[aspectratio=169,10pt]{beamer}
+\usetheme[progressbar=frametitle,numbering=fraction]{metropolis}
+\usepackage{appendixnumberbeamer}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\definecolor{VTMaroon}{RGB}{134,31,65}
+\definecolor{VTOrange}{RGB}{232,119,34}
+\setbeamercolor{frametitle}{fg=white,bg=VTMaroon}
+\setbeamercolor{progress bar}{fg=VTOrange,bg=VTMaroon!20}
+\setbeamersize{text margin left=8pt, text margin right=8pt}
+\newcommand{\hl}[1]{\textcolor{VTMaroon}{\textbf{#1}}}
+\newcommand{\sys}[1]{\texttt{#1}}
+
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{VTMaroon}\bfseries,
+  commentstyle=\color{gray},
+  stringstyle=\color{VTOrange},
+  breaklines=true,
+  columns=fullflexible,
+  showstringspaces=false,
+  frame=single
+}
+
+\title{Deft to CXL: Code Path, Commit Story, and Breakage Results}
+\subtitle{Implementation-Centric Project Report}
+\author{Yazeed Alharthi}
+\date{CS 6204 -- Spring 2026}
+
+\begin{document}
+
+\begin{frame}[plain]
+\maketitle
+\end{frame}
+
+% ------------------------------------------------------------
+% SHORT DEFT CONTEXT (<=3 slides)
+% ------------------------------------------------------------
+
+\begin{frame}{Deft in 3 bullets}
+\begin{itemize}
+  \item Deft is a disaggregated-memory B+Tree tuned for RDMA.
+  \item Core ideas: fine-grained node access, scalable locking, lightweight consistency.
+  \item My focus: \hl{port communication path to simulated CXL} without rewriting Tree logic.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Project Objective}
+\begin{itemize}
+  \item Keep index semantics stable; swap transport backend.
+  \item Build repeatable benchmarking/regression harness.
+  \item Stress system and document real failure modes + fixes.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Baseline Numbers I Started From (full 80+80 run)}
+\small
+\begin{center}
+\begin{tabular}{lrrrr}
+\toprule
+Mode & RDMA TP & RDMA Lat & CXL TP & CXL Lat \\
+ & (Mops/s) & ($\mu$s) & (Mops/s) & ($\mu$s) \\
+\midrule
+smoke & 0.784 & 6.374 & 10.106 & 0.510 \\
+small & 3.739 & 6.675 & 17.535 & 1.405 \\
+mid   & 10.728 & 6.995 & 20.587 & 3.633 \\
+big   & 17.672 & 8.494 & 20.535 & 7.270 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\footnotesize
+Overall medians: RDMA TP 7.227 vs CXL TP 18.978; RDMA Lat 6.812 vs CXL Lat 2.458.
+\end{frame}
+
+% ------------------------------------------------------------
+% COMMIT STORY + CHANGE STATS
+% ------------------------------------------------------------
+
+\section{Commit Timeline}
+
+\begin{frame}{CXL Commit Chain I Tracked}
+\small
+\begin{tabular}{ll}
+\toprule
+Commit & Meaning \\
+\midrule
+\sys{f832170} & initial CXL port scaffold \\
+\sys{87e94aa} & CXL bring-up cleanup \\
+\sys{75a2862} & CXL bug fix \\
+\sys{0cf49a0} & CXL bug fix \\
+\sys{7233322} & masked-boundary FAA fix for SX lock counters \\
+\sys{0a457ef} & multi-client RPC queue indexing/sizing fix \\
+\sys{32e5710} & breakage benchmark framework \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3cm}
+\footnotesize
+Data source: \sys{git log --grep='cxl|breakage'} and targeted \sys{git show}.
+\end{frame}
+
+\begin{frame}{How Much Code Changed?}
+\small
+\begin{block}{Range measured}
+\sys{git diff f832170..HEAD}
+\end{block}
+
+\begin{itemize}
+  \item Raw repo diff (includes generated/build artifacts in history):
+  \begin{itemize}
+    \item 142 files, 2461 insertions, 38576 deletions
+  \end{itemize}
+  \item Source-focused diff (CMake/include/src/script):
+  \begin{itemize}
+    \item 28 files, 2207 insertions, 198 deletions
+    \item include: +28/-23
+    \item src: +152/-61
+    \item script: +2024/-110
+  \end{itemize}
+\end{itemize}
+
+\begin{alertblock}{Interpretation}
+The project became \hl{tooling-heavy}: benchmark orchestration, plotting, and diagnostics are most of the net new code.
+\end{alertblock}
+\end{frame}
+
+% ------------------------------------------------------------
+% KEY FILES + MACROS
+% ------------------------------------------------------------
+
+\section{Code Path}
+
+\begin{frame}[fragile]{Compile-Time Backend Switch (CMakeLists.txt)}
+\begin{lstlisting}[language=C++]
+option(USE_CXL "Build with simulated CXL backend" OFF)
+
+if(USE_CXL)
+  add_definitions(-DUSE_CXL)
+  set(LINKS_FLAGS ... rt)
+else()
+  add_definitions(-DUSE_RDMA)
+  set(LINKS_FLAGS ... ibverbs ...)
+endif()
+
+if(USE_CXL)
+  list(FILTER COMMON_FILE EXCLUDE REGEX ".*/rdma/.*\\.cpp$")
+else()
+  list(FILTER COMMON_FILE EXCLUDE REGEX ".*/cxl/.*\\.cpp$")
+endif()
+\end{lstlisting}
+
+\footnotesize
+This keeps one codebase, but cleanly excludes transport-specific sources.
+\end{frame}
+
+\begin{frame}[fragile]{Core CXL Transport API (include/CxlTransport.h)}
+\begin{lstlisting}[language=C++]
+struct SharedRegion {
+  std::string shm_name;
+  void *base_addr;
+  uint64_t size;
+  int fd;
+};
+
+SharedRegion create_region(const std::string&, uint64_t);
+SharedRegion open_region(const std::string&, uint64_t);
+
+inline void read(void *local, const void *remote, uint64_t size);
+inline void write(void *remote, const void *local, uint64_t size);
+inline bool cas(void *remote, uint64_t expect, uint64_t val, uint64_t *old);
+\end{lstlisting}
+
+\footnotesize
+This is the replacement for verbs data-plane operations.
+\end{frame}
+
+\begin{frame}[fragile]{Client Split: RDMA and CXL in One File}
+\begin{lstlisting}[language=C++]
+// src/dsm_client.cpp
+#ifdef USE_RDMA
+  ... original RDMA path ...
+#endif
+
+#ifdef USE_CXL
+  ... CXL path (shared memory + atomics + rpc queues) ...
+#endif
+\end{lstlisting}
+
+\vspace{0.2cm}
+\footnotesize
+\sys{dsm\_client.cpp} now has explicit dual paths; Tree-facing API stays stable.
+\end{frame}
+
+\begin{frame}[fragile]{Why CXL Multi-Client Hung: Queue Layout Bug}
+\small
+\begin{block}{Before (conceptual)}
+Queue selection used only thread/dir dimensions, effectively colliding across clients.
+\end{block}
+
+\begin{block}{After (0a457ef)}
+Request/reply queues keyed by client and thread.
+\end{block}
+
+\begin{lstlisting}[language=C++]
+// src/cxl/CxlTransport.cpp
+uint64_t rpc_region_size(uint32_t num_clients,
+                         uint32_t num_app_threads,
+                         uint32_t num_directories) {
+  // req: clients * threads * dirs
+  // rep: clients * threads
+}
+\end{lstlisting}
+
+\footnotesize
+Also fixed server/client RPC region sizing and metadata publication.
+\end{frame}
+
+\begin{frame}[fragile]{SX-Lock Deadlock Root Cause and Fix (7233322)}
+\small
+\begin{block}{Problem}
+CXL FAA path did plain 64-bit add and ignored masked/boundary semantics needed by lock counters.
+\end{block}
+
+\begin{block}{Fix}
+Implemented CAS-loop emulation for masked-boundary FAA in CXL path:
+\sys{FaaBound(...)} and \sys{FaaDmBound(...)}.
+\end{block}
+
+\begin{lstlisting}[language=C++]
+// src/dsm_client.cpp (CXL path)
+void DSMClient::FaaBound(...) {
+  // CAS loop on lanes defined by mask/boundary
+  // preserve SX-lock counter semantics
+}
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]{Key Files I Would Present in Code Review}
+\small
+\begin{itemize}
+  \item \sys{CMakeLists.txt}: macro-gated backend and source filtering.
+  \item \sys{include/CxlTransport.h}, \sys{src/cxl/CxlTransport.cpp}: CXL transport primitives and RPC queues.
+  \item \sys{src/dsm\_server.cpp}: CXL region lifecycle and RPC polling loop.
+  \item \sys{src/dsm\_client.cpp}: operation mapping and lock atomic semantics.
+  \item \sys{script/run\_comparison.sh}: RDMA/CXL campaign orchestration.
+  \item \sys{script/run\_breakage\_plan.sh}: phase A/B/C stress automation.
+  \item \sys{script/plot\_comparison.py}, \sys{script/plot\_regression.py}, \sys{script/plot\_breakage\_report.py}: analysis pipeline.
+\end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+% BREAKAGE + JOURNEY
+% ------------------------------------------------------------
+
+\section{Breakage Journey}
+
+\begin{frame}{Failure Timeline and Fixes}
+\small
+\begin{tabular}{p{0.28\linewidth}p{0.33\linewidth}p{0.33\linewidth}}
+\toprule
+Symptom & Root Cause & Fix \\
+\midrule
+QP create errno 22 & userspace/kernel OFED mismatch & install matching OFED kernel modules \\
+SSH to 10.10.1.x timeout & VLAN/IP drift after driver reset & dynamic net-heal + VLAN reconstruction \\
+hugepage preflight fail & stale root-owned benchmark processes & sudo-aware kill cleanup, non-sudo run policy \\
+MR ENOMEM at 16GB & lock-memory/IOMMU constraints & ulimit fix + IOMMU passthrough config \\
+CXL multi-client hang & queue indexing/size mismatch + stale memcached keys & client-aware queue geometry + memcached flush \\
+CXL deadlock/assert & FAA semantics mismatch for SX-lock counters & masked-boundary FAA emulation \\
+\bottomrule
+\end{tabular}
+\end{frame}
+
+\begin{frame}{Breakage Harness I Added}
+\small
+\begin{itemize}
+  \item \sys{run\_breakage\_plan.sh}: phase-controlled stress runs.
+  \item \sys{--smoke12} mode: 12-test sanity (4 per phase) for fast validation.
+  \item Per-run telemetry in CSV:
+  \begin{itemize}
+    \item \sys{final\_tp\_mops}, \sys{final\_lat\_us}
+    \item \sys{cluster\_cpu\_avg\_pct}, \sys{cluster\_rss\_avg\_mb}
+  \end{itemize}
+  \item Consolidated stress reporting:
+  \begin{itemize}
+    \item phase overview plots,
+    \item phaseB heatmaps,
+    \item phaseC scaling curves,
+    \item TP-vs-CPU and TP-vs-RSS efficiency plots.
+  \end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Smoke12 Results (from \sys{deft-resultsv5})}
+\small
+\begin{center}
+\begin{tabular}{lrrrr}
+\toprule
+Run & TP (Mops/s) & Lat ($\mu$s) & CPU\% & RSS (MB) \\
+\midrule
+PhaseA RDMA (med) & 0.782 & 6.370 & 433.3 & 618.1 \\
+PhaseA CXL  (med) & 10.135 & 0.510 & 1055.8 & 10338.4 \\
+PhaseB RDMA (med) & 0.784 & 6.356 & 435.0 & 615.6 \\
+PhaseB CXL  (med) & 10.095 & 0.502 & 1069.0 & 10176.2 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{0.2cm}
+\footnotesize
+PhaseC spot checks (rr50,z0.99):
+RDMA tpc1=0.759, tpc8=6.248; CXL(c5) tpc1=9.920, tpc8=23.359 Mops/s.
+\end{frame}
+
+\begin{frame}{What I Would Claim (and Not Over-Claim)}
+\small
+\begin{block}{I can claim}
+\begin{itemize}
+  \item CXL backend works end-to-end with preserved Tree behavior.
+  \item I can reproduce and diagnose transport/path-specific failures.
+  \item I can quantify performance with resource cost and regression plots.
+\end{itemize}
+\end{block}
+
+\begin{alertblock}{I will not over-claim}
+RDMA vs localhost-CXL numbers are not strict hardware-equivalent benchmarks; they are implementation and path-behavior comparisons under current topology.
+\end{alertblock}
+\end{frame}
+
+\begin{frame}{Next Engineering Steps}
+\small
+\begin{enumerate}
+  \item Add keyspace-specific sensitivity plots to default report.
+  \item Add P95/P99 latency extraction from client logs.
+  \item Add stricter efficiency KPIs (TP per CPU\%, TP per GB RSS).
+  \item Add deterministic failure-injection scenarios into breakage phases.
+\end{enumerate}
+\end{frame}
+
+\begin{frame}[standout]
+Questions?
+\end{frame}
+
+\end{document}

@@ -4,21 +4,8 @@ build/*
 global_config.sh
 global_config.yaml
 __pycache__/
-*.tex
-
-# CloudLab generated docs
-CLOUDLAB_QUICKSTART.md
-provision/cloudlab_automated_setup.md
-dicsovery.md
-towrite.md
-cloudlab_debug_journal.md
-DEBUG_SESSION_2026-03-31.md
-cxl_plan.md
-phase3_tasks.md
-rdma_troubleshooting_2026-05-02.md
-POST_REBOOT_RECOVERY.md
 .codex
 build_cxl
-
-# local experiment notes
-/deft_breakage_plan_local.md
+docs/*
+deft-resultsv*
+.venv
