@@ -1,347 +1,466 @@
-\documentclass[aspectratio=169,10pt]{beamer}
+\documentclass[aspectratio=169,8pt]{beamer}
 \usetheme[progressbar=frametitle,numbering=fraction]{metropolis}
-\usepackage{appendixnumberbeamer}
 \usepackage{booktabs}
-\usepackage{amsmath}
-\usepackage{amssymb}
-\usepackage{listings}
-\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{pgfpages}
 
+% Uncomment to print speaker notes alongside slides:
+% \setbeameroption{show notes on second screen=right}
+
+% ── Light palette ────────────────────────────────────────────────────────────
 \definecolor{VTMaroon}{RGB}{134,31,65}
-\definecolor{VTOrange}{RGB}{232,119,34}
-\setbeamercolor{frametitle}{fg=white,bg=VTMaroon}
-\setbeamercolor{progress bar}{fg=VTOrange,bg=VTMaroon!20}
-\setbeamersize{text margin left=8pt, text margin right=8pt}
+\definecolor{VTOrange}{RGB}{210,100,20}
+\definecolor{LightBg}{RGB}{252,252,252}
+\definecolor{SlideGray}{RGB}{245,245,247}
+\definecolor{DarkText}{RGB}{25,30,40}
+\definecolor{MidText}{RGB}{80,90,105}
+\definecolor{AccentBlue}{RGB}{30,80,140}
+
+\setbeamercolor{background canvas}{bg=LightBg}
+\setbeamercolor{frametitle}{fg=white, bg=VTMaroon}
+\setbeamercolor{progress bar}{fg=VTOrange, bg=VTMaroon!25}
+\setbeamercolor{normal text}{fg=DarkText}
+\setbeamercolor{alerted text}{fg=VTMaroon}
+\setbeamercolor{block title}{fg=white, bg=AccentBlue}
+\setbeamercolor{block body}{fg=DarkText, bg=SlideGray}
+\setbeamercolor{block title alerted}{fg=white, bg=VTMaroon}
+\setbeamercolor{block body alerted}{fg=DarkText, bg=SlideGray}
+\setbeamercolor{block title example}{fg=white, bg=VTOrange!80!black}
+\setbeamercolor{block body example}{fg=DarkText, bg=SlideGray}
+\setbeamercolor{structure}{fg=VTMaroon}
+
+\setbeamersize{text margin left=10pt, text margin right=10pt}
+
 \newcommand{\hl}[1]{\textcolor{VTMaroon}{\textbf{#1}}}
+\newcommand{\bl}[1]{\textcolor{AccentBlue}{\textbf{#1}}}
 \newcommand{\sys}[1]{\texttt{#1}}
+\newcommand{\good}[1]{\textcolor{green!50!black}{\textbf{#1}}}
+\newcommand{\bad}[1]{\textcolor{red!70!black}{\textbf{#1}}}
 
-\lstset{
-  basicstyle=\ttfamily\scriptsize,
-  keywordstyle=\color{VTMaroon}\bfseries,
-  commentstyle=\color{gray},
-  stringstyle=\color{VTOrange},
-  breaklines=true,
-  columns=fullflexible,
-  showstringspaces=false,
-  frame=single
-}
-
-\title{Deft to CXL: Code Path, Commit Story, and Breakage Results}
-\subtitle{Implementation-Centric Project Report}
+\title{Deft on Simulated CXL}
+\subtitle{Porting, Benchmarking, and Stress Testing a Disaggregated B+Tree}
 \author{Yazeed Alharthi}
-\date{CS 6204 -- Spring 2026}
+\date{CS6204 · Spring 2026 \quad|\quad Instructor: Sam H. Noh}
 
+% ════════════════════════════════════════════════════════════════════════════
 \begin{document}
+% ════════════════════════════════════════════════════════════════════════════
 
+% ── SLIDE 1 · Title ──────────────────────────────────────────────────────────
 \begin{frame}[plain]
 \maketitle
+\note{Welcome. This talk covers two things: a quick summary of Deft and why it is interesting, then what I actually built — porting Deft from RDMA to simulated CXL, running 734 benchmark jobs, and stress-testing through five parameter-sweep phases. All 734 runs completed with zero failures. Ten slides total: three on Deft, seven on the project.}
 \end{frame}
 
-% ------------------------------------------------------------
-% SHORT DEFT CONTEXT (<=3 slides)
-% ------------------------------------------------------------
+% ── SLIDE 2 · What is Deft ───────────────────────────────────────────────────
+\begin{frame}{What Is Deft? (EuroSys '25)}
 
-\begin{frame}{Deft in 3 bullets}
-\begin{itemize}
-  \item Deft is a disaggregated-memory B+Tree tuned for RDMA.
-  \item Core ideas: fine-grained node access, scalable locking, lightweight consistency.
-  \item My focus: \hl{port communication path to simulated CXL} without rewriting Tree logic.
-\end{itemize}
+\begin{exampleblock}{The Core Insight}
+Maintain \hl{Large Logical Nodes} (low tree height) but perform \hl{Fine-Grained Physical Access} (tiny RDMA reads/writes).
+\end{exampleblock}
+
+\vspace{0.4em}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.32\textwidth}
+\bl{1 · I/O Amplification}\\
+\textbf{Pain:} RDMA reads full 1KB node per lookup $\to$ NIC saturation.\\
+\textbf{Fix:} \hl{Fine-grained Access}\\
+\sys{Segmented} internal sub-nodes + \sys{Hash-based} leaf buckets.\\
+Read \sys{128B} vs full 1KB.\\
+\good{8$\times$ bandwidth reduction.}
+\end{column}
+
+\begin{column}{0.32\textwidth}
+\bl{2 · Write Contention}\\
+\textbf{Pain:} Lock = remote CAS $\to$ 1 RTT per contention retry.\\
+\textbf{Fix:} \hl{Scalable SX Lock}\\
+Masked FAA allows \hl{parallel updates} in shared mode.\\
+\good{2.5$\times$ contention gain.}
+\end{column}
+
+\begin{column}{0.32\textwidth}
+\bl{3 · Consistency}\\
+\textbf{Pain:} One-sided reads lack ordering $\to$ torn writes.\\
+\textbf{Fix:} \hl{OPDV (Versioning)}\\
+Validate child via version in parent pointer.\\
+\good{46\% latency reduction.}
+\end{column}
+\end{columns}
+
+\vspace{1em}
+\centering
+\fbox{\textbf{Result: \hl{9.5$\times$} overall throughput gain vs. baseline RDMA B+tree}}
+
+\note{Key takeaway: Deft solves I/O amplification at every level. Internal nodes are segmented into sub-nodes and leaves are partitioned into hash buckets. This allows the system to fetch only 128 bytes per level instead of 1KB, while keeping the tree shallow. This fine-grained access, combined with parallel updates via the SX lock, is what drives the 9.5x gain.}
 \end{frame}
 
-\begin{frame}{Project Objective}
-\begin{itemize}
-  \item Keep index semantics stable; swap transport backend.
-  \item Build repeatable benchmarking/regression harness.
-  \item Stress system and document real failure modes + fixes.
-\end{itemize}
-\end{frame}
+% ── SLIDE 3 · SX Lock deep dive ──────────────────────────────────────────────
+\begin{frame}{The SX Lock: Why It Matters for CXL}
 
-\begin{frame}{Baseline Numbers I Started From (full 80+80 run)}
-\small
-\begin{center}
-\begin{tabular}{lrrrr}
-\toprule
-Mode & RDMA TP & RDMA Lat & CXL TP & CXL Lat \\
- & (Mops/s) & ($\mu$s) & (Mops/s) & ($\mu$s) \\
-\midrule
-smoke & 0.784 & 6.374 & 10.106 & 0.510 \\
-small & 3.739 & 6.675 & 17.535 & 1.405 \\
-mid   & 10.728 & 6.995 & 20.587 & 3.633 \\
-big   & 17.672 & 8.494 & 20.535 & 7.270 \\
-\bottomrule
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.55\textwidth}
+
+\textbf{SX lock structure (64-bit word, low$\rightarrow$high bits)}\\[0.4em]
+{\small
+\begin{tabular}{|c|c|c|c|}
+\hline
+S-ticket & S-current & X-ticket & X-current \\
+16 bits  & 16 bits   & 16 bits  & 16 bits   \\
+\hline
 \end{tabular}
-\end{center}
-\footnotesize
-Overall medians: RDMA TP 7.227 vs CXL TP 18.978; RDMA Lat 6.812 vs CXL Lat 2.458.
+}
+
+\vspace{0.6em}
+\textbf{RDMA}: masked-boundary \sys{FAA} (\sys{IBV\_EXP\_WR\_EXT\_MASKED\_ATOMIC\_FETCH\_AND\_ADD}) updates the lock word in NIC hardware, with no software CAS retry loop.
+
+\vspace{0.6em}
+\textbf{CXL}: no masked-boundary FAA primitive in this backend. We emulate it with a \hl{software CAS retry loop}:
+\begin{enumerate}
+  \item Load the 64-bit word
+  \item Increment only the target lane
+  \item \sys{compare\_exchange\_weak} — retry if another thread raced
+\end{enumerate}
+
+\vspace{0.4em}
+{\small Combined gain of all three techniques: \hl{9.5$\times$} throughput vs baseline RDMA B+tree.}
+
+\end{column}
+\begin{column}{0.43\textwidth}
+
+\begin{alertblock}{Bug found during bring-up}
+\small \textbf{Issue:} \sys{FaaBound/FaaDmBound} used plain 64-bit \sys{fetch\_add} and ignored\\
+\sys{XS\_LOCK\_FAA\_MASK = 0x8000800080008000}.\\[0.3em]
+That allows carry between 16-bit SX-lock lanes (S/X ticket/current), corrupting lock state.\\[0.3em]
+\textbf{Symptom:} \texttt{Deadlock [...] lock upgrade} $\to$ \texttt{exit(-1)} (code~255).\\[0.3em]
+\textbf{What CXL code does now:} CAS-retry loop over the 64-bit word, updates only masked 16-bit lanes, preserves unmasked bits, and retries until \sys{compare\_exchange\_weak} succeeds.
+\end{alertblock}
+
+\vspace{0.4em}
+\begin{block}{Second bug: RPC queue collision}
+\small Queue layout keyed only by (thread, dir). Multiple clients wrote into the same slots.\\
+\textbf{Fix:} Key changed to (client\_id, thread, dir).
+\end{block}
+
+\end{column}
+\end{columns}
+
+\note{Both bugs were found and fixed before any benchmark data was collected. The FAA bug is subtle — the mask is what makes the SX lock work safely across all four lanes. Without it the lock state is silently corrupted and the deadlock is non-deterministic. The RPC queue bug only appeared when running more than one CXL client process simultaneously — single-client tests passed. These two bugs together took about two days to find and understand.}
 \end{frame}
 
-% ------------------------------------------------------------
-% COMMIT STORY + CHANGE STATS
-% ------------------------------------------------------------
+% ── SLIDE 4 · Hardware + CXL Design ─────────────────────────────────────────
+\begin{frame}{Hardware Setup and CXL Simulation Design}
 
-\section{Commit Timeline}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.43\textwidth}
 
-\begin{frame}{CXL Commit Chain I Tracked}
-\small
+\textbf{Cluster: Utah CloudLab d6515}\\[0.4em]
+{\small
 \begin{tabular}{ll}
 \toprule
-Commit & Meaning \\
+Item & Value \\
 \midrule
-\sys{f832170} & initial CXL port scaffold \\
-\sys{87e94aa} & CXL bring-up cleanup \\
-\sys{75a2862} & CXL bug fix \\
-\sys{0cf49a0} & CXL bug fix \\
-\sys{7233322} & masked-boundary FAA fix for SX lock counters \\
-\sys{0a457ef} & multi-client RPC queue indexing/sizing fix \\
-\sys{32e5710} & breakage benchmark framework \\
+CPU & AMD EPYC 7452, 32 cores \\
+RAM & 125~GiB \\
+NIC & ConnectX-5~Ex, 100~Gb/s \\
+Topology & 1 MN + 5 CN \\
+\texttt{/dev/shm} & 63~GB \\
+Max threads & 150 (both transports) \\
 \bottomrule
 \end{tabular}
-
-\vspace{0.3cm}
-\footnotesize
-Data source: \sys{git log --grep='cxl|breakage'} and targeted \sys{git show}.
-\end{frame}
-
-\begin{frame}{How Much Code Changed?}
-\small
-\begin{block}{Range measured}
-\sys{git diff f832170..HEAD}
-\end{block}
-
-\begin{itemize}
-  \item Raw repo diff (includes generated/build artifacts in history):
-  \begin{itemize}
-    \item 142 files, 2461 insertions, 38576 deletions
-  \end{itemize}
-  \item Source-focused diff (CMake/include/src/script):
-  \begin{itemize}
-    \item 28 files, 2207 insertions, 198 deletions
-    \item include: +28/-23
-    \item src: +152/-61
-    \item script: +2024/-110
-  \end{itemize}
-\end{itemize}
-
-\begin{alertblock}{Interpretation}
-The project became \hl{tooling-heavy}: benchmark orchestration, plotting, and diagnostics are most of the net new code.
-\end{alertblock}
-\end{frame}
-
-% ------------------------------------------------------------
-% KEY FILES + MACROS
-% ------------------------------------------------------------
-
-\section{Code Path}
-
-\begin{frame}[fragile]{Compile-Time Backend Switch (CMakeLists.txt)}
-\begin{lstlisting}[language=C++]
-option(USE_CXL "Build with simulated CXL backend" OFF)
-
-if(USE_CXL)
-  add_definitions(-DUSE_CXL)
-  set(LINKS_FLAGS ... rt)
-else()
-  add_definitions(-DUSE_RDMA)
-  set(LINKS_FLAGS ... ibverbs ...)
-endif()
-
-if(USE_CXL)
-  list(FILTER COMMON_FILE EXCLUDE REGEX ".*/rdma/.*\\.cpp$")
-else()
-  list(FILTER COMMON_FILE EXCLUDE REGEX ".*/cxl/.*\\.cpp$")
-endif()
-\end{lstlisting}
-
-\footnotesize
-This keeps one codebase, but cleanly excludes transport-specific sources.
-\end{frame}
-
-\begin{frame}[fragile]{Core CXL Transport API (include/CxlTransport.h)}
-\begin{lstlisting}[language=C++]
-struct SharedRegion {
-  std::string shm_name;
-  void *base_addr;
-  uint64_t size;
-  int fd;
-};
-
-SharedRegion create_region(const std::string&, uint64_t);
-SharedRegion open_region(const std::string&, uint64_t);
-
-inline void read(void *local, const void *remote, uint64_t size);
-inline void write(void *remote, const void *local, uint64_t size);
-inline bool cas(void *remote, uint64_t expect, uint64_t val, uint64_t *old);
-\end{lstlisting}
-
-\footnotesize
-This is the replacement for verbs data-plane operations.
-\end{frame}
-
-\begin{frame}[fragile]{Client Split: RDMA and CXL in One File}
-\begin{lstlisting}[language=C++]
-// src/dsm_client.cpp
-#ifdef USE_RDMA
-  ... original RDMA path ...
-#endif
-
-#ifdef USE_CXL
-  ... CXL path (shared memory + atomics + rpc queues) ...
-#endif
-\end{lstlisting}
-
-\vspace{0.2cm}
-\footnotesize
-\sys{dsm\_client.cpp} now has explicit dual paths; Tree-facing API stays stable.
-\end{frame}
-
-\begin{frame}[fragile]{Why CXL Multi-Client Hung: Queue Layout Bug}
-\small
-\begin{block}{Before (conceptual)}
-Queue selection used only thread/dir dimensions, effectively colliding across clients.
-\end{block}
-
-\begin{block}{After (0a457ef)}
-Request/reply queues keyed by client and thread.
-\end{block}
-
-\begin{lstlisting}[language=C++]
-// src/cxl/CxlTransport.cpp
-uint64_t rpc_region_size(uint32_t num_clients,
-                         uint32_t num_app_threads,
-                         uint32_t num_directories) {
-  // req: clients * threads * dirs
-  // rep: clients * threads
 }
-\end{lstlisting}
 
-\footnotesize
-Also fixed server/client RPC region sizing and metadata publication.
-\end{frame}
+\vspace{0.6em}
+\small \textbf{vs.\ paper:} 10 nodes, Intel Xeon, 100G InfiniBand, 1800 threads.\\[0.3em]
+RDMA runs cross the real network. CXL runs are localhost \sys{memcpy} + atomics on \texttt{/dev/shm}.
 
-\begin{frame}[fragile]{SX-Lock Deadlock Root Cause and Fix (7233322)}
-\small
-\begin{block}{Problem}
-CXL FAA path did plain 64-bit add and ignored masked/boundary semantics needed by lock counters.
-\end{block}
+\end{column}
+\begin{column}{0.55\textwidth}
 
-\begin{block}{Fix}
-Implemented CAS-loop emulation for masked-boundary FAA in CXL path:
-\sys{FaaBound(...)} and \sys{FaaDmBound(...)}.
-\end{block}
+\textbf{How CXL is simulated}\\[0.3em]
+\small CXL.mem $\approx$ cache-coherent load/store to remote memory. We simulate with \sys{shm\_open} + \sys{mmap MAP\_SHARED}. Three named regions replace all RDMA infrastructure:
 
-\begin{lstlisting}[language=C++]
-// src/dsm_client.cpp (CXL path)
-void DSMClient::FaaBound(...) {
-  // CAS loop on lanes defined by mask/boundary
-  // preserve SX-lock counter semantics
+\vspace{0.3em}
+{\small
+\begin{tabular}{lll}
+\toprule
+Region & Replaces & Size \\
+\midrule
+\sys{/deft\_dsm} & RDMA MR (B+tree pages) & configurable (16~GB default) \\
+\sys{/deft\_lock} & NIC on-chip device mem & 256~KB \\
+\sys{/deft\_rpc} & UD QP send/recv & 0.5--2.6~MB (1--5 clients) \\
+\bottomrule
+\end{tabular}
 }
-\end{lstlisting}
-\end{frame}
 
-\begin{frame}[fragile]{Key Files I Would Present in Code Review}
-\small
-\begin{itemize}
-  \item \sys{CMakeLists.txt}: macro-gated backend and source filtering.
-  \item \sys{include/CxlTransport.h}, \sys{src/cxl/CxlTransport.cpp}: CXL transport primitives and RPC queues.
-  \item \sys{src/dsm\_server.cpp}: CXL region lifecycle and RPC polling loop.
-  \item \sys{src/dsm\_client.cpp}: operation mapping and lock atomic semantics.
-  \item \sys{script/run\_comparison.sh}: RDMA/CXL campaign orchestration.
-  \item \sys{script/run\_breakage\_plan.sh}: phase A/B/C stress automation.
-  \item \sys{script/plot\_comparison.py}, \sys{script/plot\_regression.py}, \sys{script/plot\_breakage\_report.py}: analysis pipeline.
-\end{itemize}
-\end{frame}
-
-% ------------------------------------------------------------
-% BREAKAGE + JOURNEY
-% ------------------------------------------------------------
-
-\section{Breakage Journey}
-
-\begin{frame}{Failure Timeline and Fixes}
-\small
-\begin{tabular}{p{0.28\linewidth}p{0.33\linewidth}p{0.33\linewidth}}
+\vspace{0.4em}
+{\small
+\begin{tabular}{ll}
 \toprule
-Symptom & Root Cause & Fix \\
+RDMA verb & CXL replacement \\
 \midrule
-QP create errno 22 & userspace/kernel OFED mismatch & install matching OFED kernel modules \\
-SSH to 10.10.1.x timeout & VLAN/IP drift after driver reset & dynamic net-heal + VLAN reconstruction \\
-hugepage preflight fail & stale root-owned benchmark processes & sudo-aware kill cleanup, non-sudo run policy \\
-MR ENOMEM at 16GB & lock-memory/IOMMU constraints & ulimit fix + IOMMU passthrough config \\
-CXL multi-client hang & queue indexing/size mismatch + stale memcached keys & client-aware queue geometry + memcached flush \\
-CXL deadlock/assert & FAA semantics mismatch for SX-lock counters & masked-boundary FAA emulation \\
+\sys{READ} + \sys{poll\_cq} & \sys{memcpy} + acquire fence \\
+\sys{WRITE} + \sys{poll\_cq} & \sys{memcpy} + release fence \\
+\sys{CMP\_AND\_SWP} & \sys{compare\_exchange\_strong} \\
+\sys{ibv\_poll\_cq} & no-op (synchronous) \\
+UD RPC messages & shared-memory ring buffer \\
 \bottomrule
 \end{tabular}
+}
+
+\vspace{0.3em}
+\small \textbf{Scale:} 20 files, 910 lines added, \good{0 B+tree lines changed.}
+
+\end{column}
+\end{columns}
+
+\note{The IOMMU was the hardest infrastructure problem on these AMD nodes. Default AMD IOMMU limits scatter-gather mappings to ~4 million IO pages — not enough for a 16 GB RDMA registration. Fix: set iommu=pt in GRUB, reboot all six nodes. Permanent change. Also note the topology asymmetry: RDMA uses five separate compute nodes; CXL runs all five client processes on the same machine as the server, sharing CPU, LLC, and memory bus. This is a simulation limitation — real CXL would use separate nodes connected via a CXL switch.}
 \end{frame}
 
-\begin{frame}{Breakage Harness I Added}
-\small
-\begin{itemize}
-  \item \sys{run\_breakage\_plan.sh}: phase-controlled stress runs.
-  \item \sys{--smoke12} mode: 12-test sanity (4 per phase) for fast validation.
-  \item Per-run telemetry in CSV:
-  \begin{itemize}
-    \item \sys{final\_tp\_mops}, \sys{final\_lat\_us}
-    \item \sys{cluster\_cpu\_avg\_pct}, \sys{cluster\_rss\_avg\_mb}
-  \end{itemize}
-  \item Consolidated stress reporting:
-  \begin{itemize}
-    \item phase overview plots,
-    \item phaseB heatmaps,
-    \item phaseC scaling curves,
-    \item TP-vs-CPU and TP-vs-RSS efficiency plots.
-  \end{itemize}
-\end{itemize}
-\end{frame}
+% ── SLIDE 5 · Test Corpus ────────────────────────────────────────────────────
+\begin{frame}{Test Corpus: Three Result Sets, Five Phases}
 
-\begin{frame}{Smoke12 Results (from \sys{deft-resultsv5})}
-\small
-\begin{center}
-\begin{tabular}{lrrrr}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.44\textwidth}
+
+\textbf{Three result sets (why not one?)}\\[0.3em]
+{\small Each was produced by a different script invocation with a different goal. The split is by experiment objective, not duplication.}
+
+\vspace{0.4em}
+{\small
+\begin{tabular}{llr}
 \toprule
-Run & TP (Mops/s) & Lat ($\mu$s) & CPU\% & RSS (MB) \\
+Folder & Goal & Rows \\
 \midrule
-PhaseA RDMA (med) & 0.782 & 6.370 & 433.3 & 618.1 \\
-PhaseA CXL  (med) & 10.135 & 0.510 & 1055.8 & 10338.4 \\
-PhaseB RDMA (med) & 0.784 & 6.356 & 435.0 & 615.6 \\
-PhaseB CXL  (med) & 10.095 & 0.502 & 1069.0 & 10176.2 \\
+\texttt{v4} & RDMA vs CXL baseline & 160 \\
+\texttt{v6} & Stress phases A, B, C & 270 \\
+\texttt{v7} & Stress phases D, E & 304 \\
+\midrule
+\multicolumn{2}{l}{Combined · \good{0 failures}} & \textbf{734} \\
 \bottomrule
 \end{tabular}
-\end{center}
+}
 
-\vspace{0.2cm}
-\footnotesize
-PhaseC spot checks (rr50,z0.99):
-RDMA tpc1=0.759, tpc8=6.248; CXL(c5) tpc1=9.920, tpc8=23.359 Mops/s.
+\vspace{0.4em}
+{\small \texttt{v4}: \sys{run\_comparison.sh --ycsba-full}\\
+4 modes $\times$ 4 zipf $\times$ rr=50 $\times$ 5 repeats = 80 jobs/transport, RDMA then CXL.}
+
+\end{column}
+\begin{column}{0.54\textwidth}
+
+\textbf{Five stress phases — 422 runs total}\\[0.3em]
+{\small
+\begin{tabular}{llrr}
+\toprule
+Phase & What varies & /transport & Total \\
+\midrule
+A · Baseline & mode $\times$ zipf; rr=50 fixed & 27 & 54 \\
+B · rr/zipf & rr $\times$ zipf; small+mid & 48 & 96 \\
+C · Threads & tpc sweep + client count & 30/90 & 120 \\
+D · Keyspace & keyspace only; tpc=8 & 12 & 24 \\
+E · Interaction & rr $\times$ zipf $\times$ keyspace & 64 & 128 \\
+\midrule
+\multicolumn{2}{l}{Total} & & \textbf{422} \\
+\bottomrule
+\end{tabular}
+}
+
+\vspace{0.25em}
+{\scriptsize
+\textbf{Intent:} A baseline gap; B rr/zipf sensitivity; C thread-vs-client scaling; D keyspace-only scaling; E 3-way interaction.}
+
+\vspace{0.25em}
+{\small
+Phase C gives CXL 90 rows vs 30 RDMA because CXL also sweeps \emph{client count} $\in$ \{1,3,5\} to isolate per-client vs total-thread effects. Phase E sweeps a 4$\times$4$\times$4 = 64 point grid per transport with 1 repeat each.}
+
+\end{column}
+\end{columns}
+
+\note{Phase C is asymmetric by design. RDMA client count is fixed by the physical topology — you have 5 CNs or you don't. CXL client count is just a config parameter since everything runs on one machine, so we can sweep it independently. This lets us separate the question of whether performance depends on total threads, threads-per-client, or client count itself. Phase E is the densest phase: 64 combinations per transport but only one repeat each, because the questions are directional and the full grid would take too long with repeats.}
 \end{frame}
 
-\begin{frame}{What I Would Claim (and Not Over-Claim)}
-\small
-\begin{block}{I can claim}
-\begin{itemize}
-  \item CXL backend works end-to-end with preserved Tree behavior.
-  \item I can reproduce and diagnose transport/path-specific failures.
-  \item I can quantify performance with resource cost and regression plots.
-\end{itemize}
+% ── SLIDE 6 · Baseline: TP + Latency ─────────────────────────────────────────
+\begin{frame}{Baseline: Throughput and Latency vs Mode}
+
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth, height=0.52\textheight, keepaspectratio]{images/final/B1_tp_mode_zipf.png}
+\end{column}
+\begin{column}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth, height=0.52\textheight, keepaspectratio]{images/final/B2_lat_mode_zipf.png}
+\end{column}
+\end{columns}
+
+\vspace{0.3em}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.49\textwidth}
+{\small \hl{CXL leads at every mode} — gap narrows from \hl{13$\times$} at smoke (2 threads) to \hl{1.2$\times$} at big (150 threads). Both transports are Zipf-insensitive at rr=50: the \emph{write lock path} is the bottleneck, not the read cache.}
+\end{column}
+\begin{column}{0.49\textwidth}
+{\small At smoke, CXL latency is \hl{0.5~\textmu{}s} vs RDMA \hl{6.4~\textmu{}s}. That ~6~\textmu{}s gap \emph{is the NIC round-trip floor} — unavoidable in RDMA regardless of workload. CXL's \sys{memcpy} to \sys{/dev/shm} eliminates it at low concurrency.}
+\end{column}
+\end{columns}
+
+\note{The Zipf axis being flat at rr=50 is a key diagnostic. If the read cache were driving performance, higher Zipf (more skew, better cache hit rate) would show up as higher throughput. It does not. This tells you the write lock path dominates at 50/50. The convergence of the two curves from smoke to big is the first visual signal of the software-FAA scaling ceiling — by big mode the CXL advantage has nearly evaporated. The next two slides explain exactly why.}
+\end{frame}
+
+% ── SLIDE 7 · Thread scaling crossover ───────────────────────────────────────
+\begin{frame}{Thread Scaling: Peak, Decline, and Crossover}
+
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth, height=0.52\textheight, keepaspectratio]{images/final/S3_phasec_tp_threads.png}
+\end{column}
+\begin{column}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth, height=0.52\textheight, keepaspectratio]{images/final/S4_phasec_lat_threads.png}
+\end{column}
+\end{columns}
+
+\vspace{0.3em}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.49\textwidth}
+{\small CXL throughput \hl{peaks at $\approx$14~Mops/s near 40--50 threads} then \bad{declines} to 11~Mops/s at 150. RDMA grows monotonically to 10~Mops/s. Past the peak, the CAS retry rate on shared SX lock words exceeds cache-line transfer bandwidth. The software FAA loop consumes more cycles than it produces.}
+\end{column}
+\begin{column}{0.49\textwidth}
+{\small Latency crossover at \hl{$\approx$80--90 threads}. At 1 thread: CXL $\approx$0 vs RDMA 8.5~\textmu{}s. At 150 threads: CXL \bad{13.4~\textmu{}s} has exceeded RDMA 15.3~\textmu{}s. \textbf{Implication:} real CXL hardware needs native atomic support to sustain the latency advantage past $\approx$80 concurrent threads per memory pool.}
+\end{column}
+\end{columns}
+
+\note{This is the most important result in the project. The peak-and-decline shape of the CXL throughput curve is shared-memory bus saturation under software atomics. RDMA never shows this because the NIC handles masked FAA in hardware off the CPU critical path. CXL's software loop blocks the CPU until the CAS succeeds. The crossover at 80-90 threads sets a practical concurrency ceiling for simulated CXL. Real CXL hardware with native atomic instructions would push this crossover much higher. This is actually a useful finding for CXL hardware designers: masked FAA support matters a lot for B+tree workloads.}
+\end{frame}
+
+% ── SLIDE 8 · Phase E: read ratio + write-skew spike ─────────────────────────
+\begin{frame}{Stress Findings: Read Ratio and Write-Skew Behavior}
+
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth, height=0.52\textheight, keepaspectratio]{images/final/S8_phasee_tp_rr_zipf.png}
+\end{column}
+\begin{column}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth, height=0.52\textheight, keepaspectratio]{images/final/S9_phasee_lat_rr_zipf.png}
+\end{column}
+\end{columns}
+
+\vspace{0.3em}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.49\textwidth}
+{\small CXL at rr=90 reaches \hl{52--54~Mops/s} (6.5$\times$ over RDMA). At rr=0 only 2.5$\times$. Reads bypass the FAA retry loop entirely — CXL scales near-linearly with read ratio. RDMA gains only modestly (5$\to$8~Mops/s) because \emph{even pure reads pay the NIC round-trip}.}
+\end{column}
+\begin{column}{0.49\textwidth}
+{\small At \hl{zipf=0.999, rr=0}: RDMA latency spikes to \bad{29~\textmu{}s} — 3$\times$ higher than lower Zipf. All writes land on the same few leaves; every CAS retry costs a full round trip. CXL stays at \good{3~\textmu{}s}. \textbf{This case is absent from the original paper's evaluation.}}
+\end{column}
+\end{columns}
+
+\note{The zipf=0.999, rr=0 result is the most surprising finding. Under extreme hot-key write skew, multiple threads simultaneously contend on the same SX lock word. Each RDMA CAS retry costs ~6 microseconds of network round-trip time. With n threads all retrying the same lock, wait time grows as O(n * RTT). CXL avoids this because retries cost nanoseconds of cache-line transfer, not microseconds of network transit. CXL is roughly 10x more resilient to write-skew latency spikes. The Deft paper does not test this combination — it evaluates up to zipf=0.99 and focuses on mixed workloads. This is an undocumented failure mode for RDMA-based disaggregated memory under write-heavy skewed workloads.}
+\end{frame}
+
+% ── SLIDE 9 · Infrastructure failures ────────────────────────────────────────
+\begin{frame}{Debugging: What Broke Along the Way}
+
+{\small Every failure listed below was resolved before any benchmark data was collected.}
+
+\vspace{0.5em}
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.48\textwidth}
+
+\begin{block}{RDMA Driver ABI Mismatch}
+\small \sys{mlnx-ofed-kernel-dkms} missing $\Rightarrow$ kernel ran upstream \sys{mlx5\_ib.ko}. Proprietary verbs passed undocumented struct layouts $\Rightarrow$ errno 22 on QP create.
 \end{block}
 
-\begin{alertblock}{I will not over-claim}
-RDMA vs localhost-CXL numbers are not strict hardware-equivalent benchmarks; they are implementation and path-behavior comparisons under current topology.
-\end{alertblock}
+\vspace{0.3em}
+\begin{block}{VLAN Destroyed After Driver Reset}
+\small Every \sys{openibd} restart silently dropped \sys{vlan306} and the \texttt{10.10.1.x} addresses. Rewrote \sys{net\_heal.sh} to parse \sys{/var/emulab/boot/ifmap} and recreate the tagged subinterface dynamically.
+\end{block}
+
+\vspace{0.3em}
+\begin{block}{SSH \texttt{ulimit} Inheritance}
+\small Paramiko non-interactive SSH + \sys{sudo} reset locked-memory limit to 64~MB — 250,000$\times$ smaller than required for 16~GB MR registration. Fix: \sys{sudo bash -c "ulimit -l unlimited \&\& numactl ..."}
+\end{block}
+
+\end{column}
+\begin{column}{0.48\textwidth}
+
+\begin{block}{AMD IOMMU Scatter-Gather Limit}
+\small \texttt{dmesg}: \texttt{IOMMU mapping error in map\_sg (io-pages: 4194304)}. AMD IOMMU rejected the 4.19M SG page request even at 8~GB. Fix: \sys{iommu=pt amd\_iommu=pt} in GRUB + full cluster reboot. Permanent.
+\end{block}
+
+\vspace{0.3em}
+\begin{block}{Stranded Root Processes Holding Hugepages}
+\small Crashed benchmarks left root-owned processes alive. Unprivileged \sys{killall.py} could not kill them. Hugepage preflight then blocked the next run. Fix: \sys{sudo killall -9}; hard rule: never run \sys{run\_comparison.sh} with sudo.
+\end{block}
+
+\vspace{0.3em}
+{\small \textbf{Key lesson:} infrastructure failures and algorithmic failures look identical from outside — both produce a hung process that never prints a result. Systematic per-layer smoke tests are the only reliable way to separate them.}
+
+\end{column}
+\end{columns}
+
+\note{The AMD IOMMU problem was the most time-consuming to diagnose because the symptom (ENOMEM on ibv_reg_mr) looked like a memory availability problem, not a hardware mapping limit. We had 50 GB of free hugepages but still couldn't register 16 GB. Only dmesg revealed the IOMMU error. The stranded-process / sudo trap is a good story about how fixing one problem can immediately expose the next — we fixed the hugepage issue, then accidentally ran the comparison script with sudo trying to bypass a stale preflight check, which broke SSH authentication in a completely different way.}
 \end{frame}
 
-\begin{frame}{Next Engineering Steps}
-\small
-\begin{enumerate}
-  \item Add keyspace-specific sensitivity plots to default report.
-  \item Add P95/P99 latency extraction from client logs.
-  \item Add stricter efficiency KPIs (TP per CPU\%, TP per GB RSS).
-  \item Add deterministic failure-injection scenarios into breakage phases.
-\end{enumerate}
-\end{frame}
+% ── SLIDE 10 · Conclusion ─────────────────────────────────────────────────────
+\begin{frame}{Conclusion}
 
-\begin{frame}[standout]
-Questions?
+\begin{columns}[T,onlytextwidth]
+\begin{column}{0.48\textwidth}
+
+\textbf{What was built}\\[0.3em]
+{\small
+\begin{tabular}{ll}
+\toprule
+Artifact & Scale \\
+\midrule
+CXL transport backend & 20 files, 910 lines \\
+B+tree code changed & \good{0 lines} \\
+Benchmark runs & 734 total \\
+Stress runs (phases A--E) & 422 \\
+Failures & \good{0} \\
+\bottomrule
+\end{tabular}
+}
+
+\vspace{0.6em}
+\textbf{Key findings}\\[0.3em]
+{\small
+\begin{tabular}{lcc}
+\toprule
+Condition & RDMA & CXL \\
+\midrule
+Low concurrency TP & $1\times$ & \good{$13\times$} \\
+$>$80 threads TP & linear & \bad{plateaus} \\
+Read-heavy (rr=90) & 8 Mops/s & \good{54 Mops/s} \\
+Write-skew lat (z=0.999) & \bad{29~\textmu{}s} & \good{3~\textmu{}s} \\
+Keyspace sensitivity & mild & \good{none} \\
+\bottomrule
+\end{tabular}
+}
+
+\end{column}
+\begin{column}{0.50\textwidth}
+
+\begin{block}{Lesson 1 · Masked FAA is load-bearing}
+\small The SX lock semantics live in the atomic operation, not just the protocol. Getting the FAA mask wrong breaks the lock silently. Real CXL hardware needs native masked atomics to sustain the latency advantage past $\approx$80 concurrent threads.
+\end{block}
+
+\vspace{0.3em}
+\begin{block}{Lesson 2 · RDMA write-skew is fragile}
+\small At zipf=0.999, rr=0, RDMA latency spikes to 29~\textmu{}s — a pathological case the original paper does not evaluate. CXL is 10$\times$ more resilient because retries cost nanoseconds, not microseconds.
+\end{block}
+
+\vspace{0.3em}
+\begin{block}{Lesson 3 · The DSMClient abstraction works}
+\small The B+tree ran correctly over a completely different transport with zero tree-layer changes. The abstraction boundary the authors drew is genuinely good engineering.
+\end{block}
+
+\end{column}
+\end{columns}
+
+\note{Three closing sentences. First: masked FAA is not an implementation detail — it is a load-bearing primitive, and any CXL hardware evaluation of disaggregated B+trees needs to account for whether native masked atomics are available. Second: the write-skew RDMA latency spike at zipf=0.999 is a real and previously undocumented failure mode for this class of system. Third: the DSMClient abstraction boundary is genuinely good engineering — it let us port the entire transport without touching a single line of tree code. Thank you.}
 \end{frame}
 
 \end{document}

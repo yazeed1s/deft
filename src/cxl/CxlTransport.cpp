@@ -11,9 +11,7 @@
 
 namespace cxl {
 
-// ---------------------------------------------------------------------------
 // Shared-memory region management
-// ---------------------------------------------------------------------------
 
 SharedRegion create_region(const std::string &name, uint64_t size) {
   SharedRegion r;
@@ -47,8 +45,8 @@ SharedRegion create_region(const std::string &name, uint64_t size) {
   // Zero-initialize
   std::memset(r.base_addr, 0, size);
 
-  Debug::notifyInfo("cxl::create_region: name=%s size=%lu addr=%p", name.c_str(),
-                    size, r.base_addr);
+  Debug::notifyInfo("cxl::create_region: name=%s size=%lu addr=%p",
+                    name.c_str(), size, r.base_addr);
   return r;
 }
 
@@ -61,7 +59,8 @@ SharedRegion open_region(const std::string &name, uint64_t size) {
   int retries = 0;
   while (true) {
     r.fd = shm_open(name.c_str(), O_RDWR, 0666);
-    if (r.fd >= 0) break;
+    if (r.fd >= 0)
+      break;
     if (errno != ENOENT) {
       Debug::notifyError("cxl::open_region: shm_open(%s) failed: %s",
                          name.c_str(), strerror(errno));
@@ -72,7 +71,7 @@ SharedRegion open_region(const std::string &name, uint64_t size) {
           "cxl::open_region: waiting for region '%s' to appear...",
           name.c_str());
     }
-    usleep(1000);  // 1 ms
+    usleep(1000); // 1 ms
   }
 
   r.base_addr =
@@ -109,9 +108,7 @@ void destroy_region(SharedRegion &region) {
   }
 }
 
-// ---------------------------------------------------------------------------
 // RPC message queue
-// ---------------------------------------------------------------------------
 
 uint64_t rpc_region_size(uint32_t num_clients, uint32_t num_app_threads,
                          uint32_t num_directories) {
@@ -149,8 +146,7 @@ void init_rpc_region(void *base, uint32_t num_clients, uint32_t num_app_threads,
     for (uint32_t t = 0; t < num_app_threads; ++t) {
       for (uint32_t d = 0; d < num_directories; ++d) {
         meta->req_queue_offset[c][t][d] = offset;
-        auto *q =
-            reinterpret_cast<RpcQueueHeader *>((char *)base + offset);
+        auto *q = reinterpret_cast<RpcQueueHeader *>((char *)base + offset);
         q->capacity = kRpcSlotCapacity;
         q->head.store(0, std::memory_order_relaxed);
         q->tail.store(0, std::memory_order_relaxed);
@@ -180,11 +176,12 @@ void init_rpc_region(void *base, uint32_t num_clients, uint32_t num_app_threads,
 
   std::atomic_thread_fence(std::memory_order_release);
 
-  Debug::notifyInfo("cxl::init_rpc_region: %u clients, %u app_threads, %u dirs, "
-                    "total %lu bytes, %lu queues",
-                    num_clients, num_app_threads, num_directories, offset,
-                    (uint64_t)num_clients * num_app_threads * num_directories +
-                        (uint64_t)num_clients * num_app_threads);
+  Debug::notifyInfo(
+      "cxl::init_rpc_region: %u clients, %u app_threads, %u dirs, "
+      "total %lu bytes, %lu queues",
+      num_clients, num_app_threads, num_directories, offset,
+      (uint64_t)num_clients * num_app_threads * num_directories +
+          (uint64_t)num_clients * num_app_threads);
 }
 
 void rpc_send(RpcQueueHeader *q, const void *msg, size_t msg_size) {
@@ -227,4 +224,4 @@ void rpc_recv(RpcQueueHeader *q, void *msg_out, size_t msg_size) {
   }
 }
 
-}  // namespace cxl
+} // namespace cxl

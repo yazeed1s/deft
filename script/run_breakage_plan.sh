@@ -200,7 +200,7 @@ run_phase_c() {
   local cxl_root="${base_out}/cxl"
   mkdir -p "$rdma_root" "$cxl_root"
 
-  # Short sweep definition (repeats=2 only).
+  # short sweep definition (repeats=2 only).
   local tpcs=("1" "4" "8" "16" "30")
   local rrs=("50" "10" "0")
   local zfs=("0.99" "0.99" "0.999")
@@ -346,7 +346,7 @@ run_phase_d() {
   done
   echo "[${phase}] RDMA done: ${rdma_out}"
 
-  # Merge per-keyspace RDMA runs into a single CSV.
+  # merge per-keyspace RDMA runs into a single CSV.
   python3 - "$rdma_out" <<'PY'
 import csv, glob, os, sys
 root = sys.argv[1]
@@ -389,7 +389,7 @@ PY
   done
   echo "[${phase}] CXL done: ${cxl_out}"
 
-  # Merge per-keyspace CXL runs into a single CSV.
+  # merge per-keyspace CXL runs into a single CSV.
   python3 - "$cxl_out" <<'PY'
 import csv, glob, os, sys
 root = sys.argv[1]
@@ -457,7 +457,6 @@ run_phase_e() {
   local zfs=("0.0" "0.8" "0.99" "0.999")
   local keyspaces=("1000" "1000000" "100000000" "400000000")
 
-  # Optional environment overrides for quick tuning.
   if [[ -n "${PHASE_E_RRS:-}" ]]; then
     IFS=',' read -r -a rrs <<< "${PHASE_E_RRS}"
   fi
@@ -612,12 +611,10 @@ EOF
 }
 
 if [[ "$RUN_A" -eq 1 ]]; then
-  # Phase A (short baseline): smoke,small,mid × rr50 × z{0.0,0.8,0.99} × rep3
   run_phase "phaseA" "smoke,small,mid" "50" "0.0,0.8,0.99" "3"
 fi
 
 if [[ "$RUN_B" -eq 1 ]]; then
-  # Phase B (contention/skew short): small,mid × rr{10,50,90} × z{0.0,0.8,0.99,0.999} × rep2
   run_phase "phaseB" "small,mid" "10,50,90" "0.0,0.8,0.99,0.999" "2"
 fi
 

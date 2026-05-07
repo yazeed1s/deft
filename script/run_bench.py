@@ -11,7 +11,7 @@ from itertools import product
 from time import gmtime, strftime
 from ssh_connect import ssh_command
 
-# Hugepage requirements as a fraction of physical RAM (2MB pages).
+# hugepage requirements as a fraction of physical RAM (2MB pages).
 SERVER_HUGEPAGE_FRACTION = 0.40   # 40% of total RAM
 CLIENT_HUGEPAGE_MIN = 2048        # ~4 GB fixed minimum for clients
 CLIENT_HUGEPAGE_NUMA_MIN = 1536   # ~3 GB when --force-hugepage
@@ -29,7 +29,6 @@ def query_total_ram_pages(ip, username, password):
         return 16384  # fallback: assume 32GB
 
 def get_hugepage_requirements(g_cfg):
-    """Compute per-node hugepage requirements based on actual hardware."""
     username = g_cfg['username']
     password = g_cfg['password']
     ram_cache = {}
@@ -78,10 +77,6 @@ def dump_remote_log(ip, username, password, log_path, role, idx, lines=80):
         print(f"failed to fetch {role} {idx} log from {ip}: {e}")
 
 def sample_proc_usage(ip, username, password, proc_name):
-    """
-    Return (cpu_sum_pct, rss_sum_mb, proc_count) on a node for process name.
-    CPU is sum of %CPU across matching processes. RSS is sum in MB.
-    """
     cmd = (
         "bash -lc '"
         f"ps -C {proc_name} -o %cpu=,rss= 2>/dev/null || true"
@@ -366,7 +361,7 @@ def main():
             client_rss_mb_samples = []
             while not finish and not has_error:
                 time.sleep(2)
-                # Sample resource usage while benchmark processes are running.
+                # sample resource usage while benchmark processes are running.
                 server_cpu_total = 0.0
                 server_rss_total = 0.0
                 for i in range(num_servers):

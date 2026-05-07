@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the CXL binary on mn0 (alongside the existing RDMA build).
+
 set -euo pipefail
 
 DEFT_ROOT="${DEFT_ROOT:-/deft_code/deft}"
@@ -20,7 +20,7 @@ cd "${DEFT_ROOT}/build_cxl"
 rm -f CMakeCache.txt
 rm -rf CMakeFiles
 
-# Calculate safe make jobs based on available memory (~2GB per job)
+# make jobs based on available memory
 AVAIL_MEM_KB=$(awk '/MemAvailable/ {print $2}' /proc/meminfo || echo 0)
 if [[ "$AVAIL_MEM_KB" -eq 0 ]]; then
     AVAIL_MEM_KB=$(awk '/MemFree/ {print $2}' /proc/meminfo || echo 2048000)

@@ -80,14 +80,14 @@ rdma_topology=from_gen_config.py
 cxl_topology=1_server_localhost_${CXL_CLIENT_COUNT}_clients_localhost
 EOF
 
-# ── Phase 1: Build CXL if needed ──
+# for phase 1 Build CXL if needed
 if [[ ! -x "${DEFT_ROOT}/build_cxl/server" ]]; then
     echo ""
     echo "[phase 0] building CXL binaries..."
     bash "${SCRIPT_DIR}/build_cxl.sh"
 fi
 
-# ── Phase 2: RDMA Campaign ──
+#  phase 2 RDMA Campaign
 echo ""
 echo "========== RDMA CAMPAIGN =========="
 python3 gen_config.py   # generates RDMA config (multi-machine)
@@ -102,14 +102,14 @@ python3 run_campaign.py \
 
 echo "RDMA campaign done: ${RDMA_OUT}/runs.csv"
 
-# Fail fast: do not proceed to CXL when RDMA campaign has failures.
+# fail fast do not proceed to CXL when RDMA campaign has failures.
 if awk -F, 'NR>1 && $7=="fail"{found=1} END{exit(found?0:1)}' "${RDMA_OUT}/runs.csv"; then
     echo "error: RDMA campaign has failures. Skipping CXL phase."
     echo "check: ${RDMA_OUT}/runs.csv"
     exit 1
 fi
 
-# ── Phase 3: CXL Campaign ──
+# Phase 3 CXL Campaign
 echo ""
 echo "========== CXL CAMPAIGN =========="
 CXL_CLIENT_COUNT="${CXL_CLIENT_COUNT}" python3 gen_config_cxl.py   # switches config to localhost + build_cxl
@@ -124,11 +124,11 @@ python3 run_campaign.py \
 
 echo "CXL campaign done: ${CXL_OUT}/runs.csv"
 
-# ── Phase 4: Restore RDMA config ──
+# Phase 4 Restore RDMA config
 python3 gen_config.py
 echo "restored RDMA config."
 
-# ── Phase 5: Merge & Plot ──
+# Phase 5 Merge & Plot
 echo ""
 echo "========== GENERATING COMPARISON =========="
 python3 plot_comparison.py \

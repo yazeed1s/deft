@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run on mn0 to prep build + SSH connectivity for benchmark scripts.
+# run on mn0 to prep build + SSH connectivity for benchmark scripts.
 set -euo pipefail
 
 LOG_FILE=/tmp/cloudlab_setup.log
@@ -55,7 +55,7 @@ pick_reachable_ssh_target() {
 }
 
 version_ge() {
-    # Returns success when $1 >= $2
+    # success when $1 >= $2
     [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | tail -n1)" == "$1" ]]
 }
 
@@ -247,9 +247,9 @@ ensure_ofed49_userspace() {
 deb [trusted=yes] ${repo_base}/MLNX_LIBS ./
 OFEDAPT
 
-    # Avoid Ubuntu/MLNX mixed RDMA stacks. Ubuntu ibverbs-providers conflicts
+    # avoid Ubuntu/MLNX mixed RDMA stacks. Ubuntu ibverbs-providers conflicts
     # with MLNX libmlx5-1 on /etc/libibverbs.d/mlx5.driver.
-    # Also remove Ubuntu libfabric/libucx if present since they depend on
+    # also remove Ubuntu libfabric/libucx if present since they depend on
     # Ubuntu ibverbs-providers and force the conflicting package set.
     sudo apt-get purge -y rdma-core ibverbs-providers libfabric1 libucx0 || true
     sudo apt-get -f install -y || true
@@ -262,7 +262,6 @@ OFEDAPT
         libibumad libibmad infiniband-diags \
         mlnx-ofed-kernel-dkms mlnx-ofed-kernel-utils
 
-    # Ensure userspace verbs can talk to kernel RDMA stack.
     sudo modprobe ib_uverbs || true
     sudo modprobe mlx5_ib || true
     sudo ldconfig
@@ -338,7 +337,6 @@ fi
 sudo chown -R "$REAL_USER:$REAL_GROUP" "$DEFT_ROOT"
 cd "$DEFT_ROOT"
 
-# Calculate safe make jobs based on available memory (~2GB per job)
 AVAIL_MEM_KB=$(awk '/MemAvailable/ {print $2}' /proc/meminfo || echo 0)
 if [[ "$AVAIL_MEM_KB" -eq 0 ]]; then
     AVAIL_MEM_KB=$(awk '/MemFree/ {print $2}' /proc/meminfo || echo 2048000)
@@ -375,7 +373,7 @@ cd "$DEFT_ROOT/build"
 echo "using CC=${CC}"
 echo "using CXX=${CXX}"
 echo "using make -j${MAKE_JOBS} based on available RAM"
-# CMake caches compiler choice in CMakeCache.txt; clear it so upgrades are picked up.
+
 rm -f CMakeCache.txt
 rm -rf CMakeFiles
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" ..
@@ -437,7 +435,6 @@ set -euo pipefail
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$(hostname -s)] starting runtime dependency checks"
 export DEBIAN_FRONTEND=noninteractive
 
-# Install runtime shared libraries/tools needed by deft binaries
 RUNTIME_PKGS=(numactl libgflags-dev libnuma-dev libmemcached-dev libboost-all-dev)
 MISSING=()
 for p in "${RUNTIME_PKGS[@]}"; do
@@ -451,8 +448,6 @@ if [[ "${#MISSING[@]}" -gt 0 ]]; then
     sudo apt-get install -y "${MISSING[@]}"
 fi
 
-# Install MLNX OFED ibverbs if missing
-# Enforce MLNX OFED userspace stack to match mn0 and avoid mixed-RDMA setups.
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$(hostname -s)] enforcing MLNX OFED userspace RDMA stack..."
 sudo apt-get purge -y rdma-core ibverbs-providers libfabric1 libucx0 \
     libibverbs1 libibverbs-dev librdmacm1 2>/dev/null || true
@@ -472,7 +467,6 @@ sudo apt-get install -y --allow-downgrades --allow-change-held-packages --allow-
     mlnx-ofed-kernel-dkms mlnx-ofed-kernel-utils || true
 sudo ldconfig
 
-# Ensure userspace verbs can talk to kernel RDMA stack.
 sudo modprobe ib_uverbs || true
 sudo modprobe mlx5_ib || true
 

@@ -18,7 +18,7 @@ def query_total_ram_pages(ip, username, password):
         ssh.close()
         return int(out.splitlines()[-1]) // 2048
     except Exception:
-        return 16384  # fallback
+        return 16384
 
 def all_hugepage():
     username = g_cfg['username']

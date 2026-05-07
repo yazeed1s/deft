@@ -104,7 +104,7 @@ PY
     echo
   done
 
-  echo "==== latest Deft logs on mn0 ===="
+  echo "0000 latest Deft logs on mn0 "
   tail -n 200 /deft_code/deft/log/server_0.log || true
   tail -n 200 /deft_code/deft/log/client_0.log || true
   tail -n 200 /deft_code/deft/log/client_1.log || true

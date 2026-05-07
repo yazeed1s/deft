@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-"""Generate global_config.yaml for CXL mode (single-machine, localhost)."""
 import getpass
 import os
 import socket

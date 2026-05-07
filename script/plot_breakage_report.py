@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""
-Aggregate breakage-plan runs and generate stress-focused plots.
-
-Usage:
-  python3 plot_breakage_report.py \
-    --result-root /deft_code/deft/result \
-    --outdir /deft_code/deft/result/breakage-report-$(date +%Y%m%d-%H%M%S)
-"""
-
 import argparse
 import csv
 import os
@@ -112,7 +103,7 @@ def median_by(rows, key_fn, value_key):
 
 
 def plot_phase_overview(rows, outdir):
-    # Throughput and latency grouped by phase+transport.
+    # throughput and latency grouped by phase+transport.
     keys = []
     tp_vals = []
     lat_vals = []
@@ -316,4 +307,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

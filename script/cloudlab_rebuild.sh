@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fast rebuild path: do the same sync + cityhash + build steps as cloudlab_setup.
+
 set -euo pipefail
 
 LOG_FILE=/tmp/cloudlab_rebuild.log
@@ -9,15 +9,15 @@ DEFT_ROOT=/deft_code/deft
 
 usage() {
   cat <<'EOF'
-Usage:
+usage:
   ./script/cloudlab_rebuild.sh
   ./script/cloudlab_rebuild.sh --help
 
-Behavior:
-  - Run on mn0 only.
-  - Sync repo to /deft_code/deft using the same source rules as cloudlab_setup.sh.
-  - Ensure cityhash exists (same logic as cloudlab_setup.sh).
-  - Rebuild server/client in /deft_code/deft/build.
+behavior:
+  - run on mn0 only.
+  - sync repo to /deft_code/deft using the same source rules as cloudlab_setup.sh.
+  - ensure cityhash exists (same logic as cloudlab_setup.sh).
+  - rebuild server/client in /deft_code/deft/build.
 EOF
 }
 
@@ -62,7 +62,6 @@ fi
 sudo chown -R "$REAL_USER:$REAL_GROUP" "$DEFT_ROOT"
 cd "$DEFT_ROOT"
 
-# Calculate safe make jobs based on available memory (~2GB per job)
 AVAIL_MEM_KB=$(awk '/MemAvailable/ {print $2}' /proc/meminfo || echo 0)
 if [[ "$AVAIL_MEM_KB" -eq 0 ]]; then
     AVAIL_MEM_KB=$(awk '/MemFree/ {print $2}' /proc/meminfo || echo 2048000)
@@ -116,4 +115,4 @@ make -j"${MAKE_JOBS}"
 test -x ./server
 test -x ./client
 
-echo "done. sync + cityhash + build (RDMA & CXL) completed."
+echo "done. sync + cityhash + build (RDMA & CXL) done."

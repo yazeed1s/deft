@@ -95,7 +95,7 @@ def main():
         except TypeError:
             yaml.dump(config, f)
 
-    # Generate memcached.conf for restartMemc.sh
+    #  memcached.conf for restartMemc.sh
     mn0_ip = socket.gethostbyname("mn0") if resolve_ip("mn0") else mn_ips[0]
     with open('/deft_code/deft/memcached.conf', 'w') as f:
         f.write(f"{mn0_ip}\n11211\n")

@@ -1,19 +1,4 @@
 #!/usr/bin/env python3
-"""
-Plot performance change between two runs (baseline vs candidate).
-
-Inputs can be either:
-  1) two merged.csv files (from comparison-* directories), or
-  2) two runs.csv files for a single transport.
-
-For merged.csv, regressions are computed independently per transport.
-
-Outputs:
-  - delta_throughput_pct.png  (positive is improvement)
-  - delta_latency_pct.png     (negative is improvement)
-  - regression_summary.csv
-"""
-
 import argparse
 import csv
 import os
@@ -45,10 +30,6 @@ def load_rows(path, transport_override=None):
 
 
 def aggregate(rows):
-    """
-    Key = (transport, mode, rr, zipf, threads)
-    Value = medians of final throughput/latency over successful repeats.
-    """
     buckets = defaultdict(lambda: {"tp": [], "lat": [], "cpu": [], "rss": []})
     for r in rows:
         if r.get("status") != "ok":

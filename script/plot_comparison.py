@@ -37,7 +37,6 @@ def to_float(v):
 
 
 def aggregate(rows):
-    """Group by (transport, mode, read_ratio, zipf) → lists of tp/lat."""
     agg = defaultdict(
         lambda: {
             "tp": [], "lat": [], "ok": 0, "all": 0, "threads": [],
@@ -75,7 +74,7 @@ def aggregate(rows):
     return agg
 
 
-# ── Colors & style ──
+#  Colors & style
 COLORS = {"rdma": "#2196F3", "cxl": "#FF5722"}
 BAR_WIDTH = 0.35
 
@@ -107,7 +106,6 @@ def _combo_keys(agg):
     return sorted(keys, key=lambda x: (x[0], x[1], x[2]))
 
 def plot_metric_combined(agg, outdir, metric, ylabel, filename, title):
-    """Single combined grouped-bar plot across all (mode, rr, zipf) permutations."""
     combos = _combo_keys(agg)
     if not combos:
         return
@@ -224,7 +222,6 @@ def plot_metric_vs_keyspace(agg, outdir, metric, ylabel, filename, title):
     plt.close(fig)
 
 def plot_tp_vs_threads_combined(agg, outdir):
-    """Single combined scatter: throughput vs total threads across all permutations."""
     fig, ax = plt.subplots(figsize=(10, 6))
     plotted = False
 
@@ -265,7 +262,6 @@ def plot_tp_vs_threads_combined(agg, outdir):
 
 
 def plot_metric_vs_readratio(agg, outdir, metric, ylabel, prefix):
-    """Grouped bar chart by read ratio for each (mode, zipf), with IQR error bars."""
     fig, ax = plt.subplots(figsize=(9, 5.5))
     modes_seen = sorted({k[1] for k in agg})
     zipfs_seen = sorted({k[3] for k in agg})
@@ -328,7 +324,6 @@ def plot_metric_vs_readratio(agg, outdir, metric, ylabel, prefix):
 
 
 def plot_tp_vs_threads(agg, outdir):
-    """Line chart: throughput vs thread count for each (mode, zipf)."""
     fig, ax = plt.subplots(figsize=(9, 5.5))
     modes_seen = sorted({k[1] for k in agg})
     zipfs_seen = sorted({k[3] for k in agg})
@@ -370,7 +365,6 @@ def plot_tp_vs_threads(agg, outdir):
 
 
 def write_summary(rows, agg, outdir):
-    """Write a text summary of all runs."""
     total = len(rows)
     ok = sum(1 for r in rows if r["status"] == "ok")
     path = os.path.join(outdir, "summary.txt")
@@ -415,7 +409,6 @@ def write_summary(rows, agg, outdir):
 
 
 def write_merged_csv(rows, outdir):
-    """Write merged CSV with transport column."""
     path = os.path.join(outdir, "merged.csv")
     if not rows:
         return
@@ -446,7 +439,7 @@ def main():
 
     write_merged_csv(all_rows, outdir)
     write_summary(all_rows, agg, outdir)
-    # Core performance plots.
+    #  performance plots.
     plot_metric_combined(
         agg, outdir, "tp", "Throughput (Mops/s)",
         "throughput_combined.png",
